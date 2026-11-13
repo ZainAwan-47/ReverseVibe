@@ -3,32 +3,34 @@ import 'package:flutter/material.dart';
 import '../../../../theme/app_colors.dart';
 
 class BrandMark extends StatelessWidget {
-  const BrandMark({super.key});
+  const BrandMark({super.key, this.size = 68});
+
+  final double size;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 68,
-      height: 68,
+      width: size,
+      height: size,
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [AppColors.secondary, AppColors.primary],
         ),
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(size * 0.32),
         boxShadow: [
           BoxShadow(
             color: AppColors.primary.withValues(alpha: 0.28),
-            blurRadius: 28,
-            offset: const Offset(0, 10),
+            blurRadius: size * 0.4,
+            offset: Offset(0, size * 0.12),
           ),
         ],
       ),
-      child: const Icon(
+      child: Icon(
         Icons.graphic_eq_rounded,
         color: AppColors.textPrimary,
-        size: 34,
+        size: size * 0.5,
       ),
     );
   }
