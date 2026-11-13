@@ -1,0 +1,125 @@
+import 'dart:typed_data';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:reverse_vibe/features/audio/domain/audio_engine.dart';
+import 'package:reverse_vibe/features/audio/domain/models/audio_clip.dart';
+
+void main() {
+  test('AudioClip keeps temporary bytes isolated and exposes metadata', () {
+    final source = Uint8List.fromList([1, 2, 3]);
+    final clip = _createClip(data: source);
+    source[0] = 9;
+
+    expect(clip.data, [1, 2, 3]);
+    expect(clip.duration, const Duration(seconds: 2));
+    expect(clip.mimeType, 'audio/pcm');
+    expect(clip.sampleRate, 48000);
+    expect(clip.channelCount, 1);
+
+    final exposedData = clip.data;
+    exposedData[0] = 8;
+    expect(clip.data, [1, 2, 3]);
+  });
+
+  test('AudioClip rejects empty bytes and invalid metadata', () {
+    expect(() => _createClip(data: Uint8List(0)), throwsArgumentError);
+    expect(() => _createClip(duration: Duration.zero), throwsArgumentError);
+    expect(() => _createClip(mimeType: ' '), throwsArgumentError);
+    expect(() => _createClip(sampleRate: 0), throwsArgumentError);
+    expect(() => _createClip(channelCount: 0), throwsArgumentError);
+  });
+
+  test('AudioEngine contract supports temporary clips and cleanup', () async {
+    final original = _createClip(data: Uint8List.fromList([1, 2]));
+    final reversedOriginal = _createClip(data: Uint8List.fromList([2, 1]));
+    final imitation = _createClip(data: Uint8List.fromList([3, 4]));
+    final reversedImitation = _createClip(data: Uint8List.fromList([4, 3]));
+    final engine = _ContractTestAudioEngine(
+      recordings: [original, imitation],
+      reversals: [reversedOriginal, reversedImitation],
+    );
+
+    expect(engine, isA<AudioEngine>());
+    expect(
+      await engine.record(maxDuration: const Duration(seconds: 10)),
+      same(original),
+    );
+    expect(await engine.reverse(original), same(reversedOriginal));
+    await engine.play(reversedOriginal);
+
+    expect(
+      await engine.record(maxDuration: const Duration(seconds: 10)),
+      same(imitation),
+    );
+    expect(await engine.reverse(imitation), same(reversedImitation));
+    await engine.play(reversedImitation);
+    await engine.play(original);
+    await engine.stopPlayback();
+    await engine.clearTemporaryAudio();
+    await engine.dispose();
+
+    expect(engine.playedClips, [reversedOriginal, reversedImitation, original]);
+    expect(engine.playbackStopped, isTrue);
+    expect(engine.temporaryAudioCleared, isTrue);
+    expect(engine.disposed, isTrue);
+  });
+}
+
+AudioClip _createClip({
+  Uint8List? data,
+  Duration duration = const Duration(seconds: 2),
+  String mimeType = 'audio/pcm',
+  int sampleRate = 48000,
+  int channelCount = 1,
+}) {
+  return AudioClip(
+    data: data ?? Uint8List.fromList([1, 2, 3]),
+    duration: duration,
+    mimeType: mimeType,
+    sampleRate: sampleRate,
+    channelCount: channelCount,
+  );
+}
+
+class _ContractTestAudioEngine implements AudioEngine {
+  _ContractTestAudioEngine({required this.recordings, required this.reversals});
+
+  final List<AudioClip> recordings;
+  final List<AudioClip> reversals;
+  final List<AudioClip> playedClips = [];
+  int _recordingIndex = 0;
+  int _reversalIndex = 0;
+  bool playbackStopped = false;
+  bool temporaryAudioCleared = false;
+  bool disposed = false;
+
+  @override
+  Future<AudioClip> record({required Duration maxDuration}) async {
+    return recordings[_recordingIndex++];
+  }
+
+  @override
+  Future<AudioClip> reverse(AudioClip clip) async {
+    return reversals[_reversalIndex++];
+  }
+
+  @override
+  Future<void> play(AudioClip clip) async {
+    playedClips.add(clip);
+  }
+
+  @override
+  Future<void> stopPlayback() async {
+    playbackStopped = true;
+  }
+
+  @override
+  Future<void> clearTemporaryAudio() async {
+    temporaryAudioCleared = true;
+  }
+
+  @override
+  Future<void> dispose() async {
+    disposed = true;
+  }
+}

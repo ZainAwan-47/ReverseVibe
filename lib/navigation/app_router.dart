@@ -2,14 +2,18 @@ import 'package:flutter/material.dart';
 
 import '../features/home/presentation/screens/home_screen.dart';
 import '../features/home/presentation/screens/how_to_play_screen.dart';
+import '../features/splash/presentation/screens/splash_screen.dart';
 
 abstract final class AppRouter {
+  static const splash = '/splash';
   static const home = '/';
   static const howToPlay = '/how-to-play';
 
   static Route<dynamic>? onGenerateRoute(RouteSettings settings) {
     final Widget page;
     switch (settings.name) {
+      case splash:
+        page = const SplashScreen();
       case home:
         page = const HomeScreen();
       case howToPlay:
