@@ -97,6 +97,25 @@ void main() {
     );
   });
 
+  test('PCM waveform bins reflect actual sample intensity', () {
+    final pcm = Uint8List(8);
+    final samples = ByteData.sublistView(pcm);
+    samples.setInt16(0, 0, Endian.little);
+    samples.setInt16(2, 0, Endian.little);
+    samples.setInt16(4, 12000, Endian.little);
+    samples.setInt16(6, -12000, Endian.little);
+
+    final waveform = Pcm16AudioMeter.waveform(pcm, binCount: 2);
+
+    expect(waveform[0], 0);
+    expect(waveform[1], greaterThan(waveform[0]));
+    expect(Pcm16AudioMeter.waveform(Uint8List(0), binCount: 2), [0, 0]);
+    expect(
+      () => Pcm16AudioMeter.waveform(pcm, binCount: 0),
+      throwsArgumentError,
+    );
+  });
+
   test('AudioEngine contract supports temporary clips and cleanup', () async {
     final original = _createClip(data: Uint8List.fromList([1, 2]));
     final reversedOriginal = _createClip(data: Uint8List.fromList([2, 1]));

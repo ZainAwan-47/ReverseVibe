@@ -9,6 +9,7 @@ import 'package:reverse_vibe/features/recording/domain/player_b_imitation_result
 import 'package:reverse_vibe/features/recording/domain/player_a_recording_audio.dart';
 import 'package:reverse_vibe/features/recording/presentation/controllers/player_b_listening_controller.dart';
 import 'package:reverse_vibe/features/recording/presentation/screens/player_b_imitation_ready_screen.dart';
+import 'package:reverse_vibe/features/recording/presentation/screens/player_b_imitation_recording_screen.dart';
 import 'package:reverse_vibe/features/recording/presentation/screens/player_b_listening_screen.dart';
 import 'package:reverse_vibe/theme/app_theme.dart';
 
@@ -96,6 +97,8 @@ void main() {
       }
       expect(audio.playCount, 3);
 
+      await tester.tap(find.byKey(const ValueKey('player-b-start-imitation')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('player-b-recording-start')));
       await tester.pump();
       await tester.pump();
@@ -200,7 +203,14 @@ void main() {
         findsOneWidget,
       );
 
-      await _recordTake(tester);
+      await tester.tap(find.byKey(const ValueKey('player-b-recording-start')));
+      await tester.pump();
+      await tester.pump();
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('player-b-recording-stop')),
+      );
+      await tester.tap(find.byKey(const ValueKey('player-b-recording-stop')));
+      await tester.pumpAndSettle();
       await tester.tap(
         find.byKey(const ValueKey('player-b-recording-confirm')),
       );
@@ -240,6 +250,8 @@ void main() {
     await tester.pumpWidget(_app(original, controller));
     await tester.pumpAndSettle();
 
+    await tester.tap(find.byKey(const ValueKey('player-b-start-imitation')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('player-b-recording-start')));
     await tester.pumpAndSettle();
     expect(find.text('Microphone access is needed'), findsOneWidget);
@@ -256,6 +268,8 @@ void main() {
       await tester.pumpWidget(_app(original, controller));
       await tester.pumpAndSettle();
 
+      await tester.tap(find.byKey(const ValueKey('player-b-start-imitation')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('player-b-recording-start')));
       await tester.pump();
       await tester.pump();
@@ -274,6 +288,8 @@ void main() {
 }
 
 Future<void> _recordTake(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('player-b-start-imitation')));
+  await tester.pumpAndSettle();
   await tester.tap(find.byKey(const ValueKey('player-b-recording-start')));
   await tester.pump();
   await tester.pump();
@@ -309,6 +325,12 @@ Widget _app(
     ),
     onGenerateRoute: (settings) {
       final result = settings.arguments;
+      if (result is PlayerBListeningController) {
+        return MaterialPageRoute<void>(
+          settings: settings,
+          builder: (_) => PlayerBImitationRecordingScreen(controller: result),
+        );
+      }
       if (result is PlayerBImitationResult) {
         onConfirmed?.call(result);
         return MaterialPageRoute<void>(

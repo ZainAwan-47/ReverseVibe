@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:reverse_vibe/features/audio/domain/models/audio_clip.dart';
@@ -130,6 +131,9 @@ class _PlayerARecordingScreenState extends State<PlayerARecordingScreen> {
                                 position: _controller.playbackPosition,
                                 remaining: _controller.playbackRemaining,
                                 isPlaying: _controller.isPlaying,
+                                waveform: _controller.playbackWaveform,
+                                waveformProgress:
+                                    _controller.playbackWaveformProgress,
                                 onToggle: () =>
                                     unawaited(_controller.togglePlayback()),
                               ),
@@ -318,6 +322,8 @@ class _PlaybackCard extends StatelessWidget {
     required this.position,
     required this.remaining,
     required this.isPlaying,
+    required this.waveform,
+    required this.waveformProgress,
     required this.onToggle,
   });
 
@@ -325,6 +331,8 @@ class _PlaybackCard extends StatelessWidget {
   final Duration position;
   final Duration remaining;
   final bool isPlaying;
+  final List<double> waveform;
+  final double waveformProgress;
   final VoidCallback onToggle;
 
   @override
@@ -335,13 +343,11 @@ class _PlaybackCard extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         child: Row(
           children: [
-            IconButton.filledTonal(
-              key: const ValueKey('recording-playback-toggle'),
-              tooltip: isPlaying ? 'Pause recording' : 'Play recording',
+            _PlaybackWaveformControl(
+              waveform: waveform,
+              progress: waveformProgress,
+              isPlaying: isPlaying,
               onPressed: onToggle,
-              icon: Icon(
-                isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-              ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -391,6 +397,98 @@ class _PlaybackCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _PlaybackWaveformControl extends StatelessWidget {
+  const _PlaybackWaveformControl({
+    required this.waveform,
+    required this.progress,
+    required this.isPlaying,
+    required this.onPressed,
+  });
+
+  final List<double> waveform;
+  final double progress;
+  final bool isPlaying;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: 'Original recording playback waveform',
+      child: SizedBox(
+        width: 76,
+        height: 76,
+        child: CustomPaint(
+          key: const ValueKey('recording-playback-visualizer'),
+          painter: _PlaybackWaveformPainter(
+            waveform: waveform,
+            progress: progress,
+            isPlaying: isPlaying,
+          ),
+          child: Center(
+            child: IconButton.filledTonal(
+              key: const ValueKey('recording-playback-toggle'),
+              tooltip: isPlaying ? 'Pause recording' : 'Play recording',
+              onPressed: onPressed,
+              icon: Icon(
+                isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PlaybackWaveformPainter extends CustomPainter {
+  const _PlaybackWaveformPainter({
+    required this.waveform,
+    required this.progress,
+    required this.isPlaying,
+  });
+
+  final List<double> waveform;
+  final double progress;
+  final bool isPlaying;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (waveform.isEmpty) {
+      return;
+    }
+
+    final center = Offset(size.width / 2, size.height / 2);
+    final paint = Paint()
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 2;
+    for (var index = 0; index < waveform.length; index++) {
+      final level = waveform[index].clamp(0, 1).toDouble();
+      final angle = index * math.pi * 2 / waveform.length - math.pi / 2;
+      final innerRadius = 27.0;
+      final outerRadius = innerRadius + 2 + level * 8;
+      final played = isPlaying && index / waveform.length <= progress;
+      paint.color = played ? AppColors.secondary : AppColors.border;
+      canvas.drawLine(
+        Offset(
+          center.dx + math.cos(angle) * innerRadius,
+          center.dy + math.sin(angle) * innerRadius,
+        ),
+        Offset(
+          center.dx + math.cos(angle) * outerRadius,
+          center.dy + math.sin(angle) * outerRadius,
+        ),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_PlaybackWaveformPainter oldDelegate) =>
+      oldDelegate.waveform != waveform ||
+      oldDelegate.progress != progress ||
+      oldDelegate.isPlaying != isPlaying;
 }
 
 class _PermissionNotice extends StatelessWidget {

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:reverse_vibe/features/audio/domain/models/audio_clip.dart';
+import 'package:reverse_vibe/features/audio/domain/pcm16_audio_meter.dart';
 
 import '../../data/in_memory_player_a_recording_audio.dart';
 import '../../data/permission_handler_microphone_gateway.dart';
@@ -80,6 +81,18 @@ class PlayerARecordingController extends ChangeNotifier {
     return clip.duration - _playbackPosition;
   }
 
+  List<double> _playbackWaveform = const [];
+  List<double> get playbackWaveform => _playbackWaveform;
+
+  double get playbackWaveformProgress {
+    if (!_isPlaying || _clip == null || _clip!.duration <= Duration.zero) {
+      return 0;
+    }
+    return (_playbackPosition.inMicroseconds / _clip!.duration.inMicroseconds)
+        .clamp(0, 1)
+        .toDouble();
+  }
+
   String? _errorMessage;
   String? get errorMessage => _errorMessage;
 
@@ -124,6 +137,7 @@ class PlayerARecordingController extends ChangeNotifier {
 
       await audio.stopPlayback();
       _clip = null;
+      _playbackWaveform = const [];
       _elapsed = Duration.zero;
       _playbackPosition = Duration.zero;
       await audio.startRecording();
@@ -174,11 +188,16 @@ class PlayerARecordingController extends ChangeNotifier {
         throw StateError('No usable audio was captured.');
       }
       _clip = clip;
+      final data = clip.data;
+      _playbackWaveform = data.length > 44
+          ? Pcm16AudioMeter.waveform(Uint8List.sublistView(data, 44))
+          : const [];
       _elapsed = clip.duration;
       _status = PlayerARecordingStatus.recorded;
       _errorMessage = null;
     } catch (error) {
       _clip = null;
+      _playbackWaveform = const [];
       _setError(_recordingErrorMessage(error));
     } finally {
       _isBusy = false;
@@ -219,6 +238,7 @@ class PlayerARecordingController extends ChangeNotifier {
     try {
       await audio.stopPlayback();
       _clip = null;
+      _playbackWaveform = const [];
       _elapsed = Duration.zero;
       _playbackPosition = Duration.zero;
       _isPlaying = false;

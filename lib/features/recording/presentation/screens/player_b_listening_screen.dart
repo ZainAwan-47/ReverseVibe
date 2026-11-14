@@ -256,12 +256,12 @@ class _PlayerBListeningScreenState extends State<PlayerBListeningScreen> {
               ),
               const SizedBox(height: 18),
               FilledButton.icon(
-                key: const ValueKey('player-b-recording-start'),
+                key: const ValueKey('player-b-start-imitation'),
                 onPressed: _controller.isBusy
                     ? null
-                    : _controller.startRecording,
-                icon: const Icon(Icons.mic_none_rounded),
-                label: const Text('Record imitation'),
+                    : () => unawaited(_openImitationRecording()),
+                icon: const Icon(Icons.arrow_forward_rounded),
+                label: const Text('Start Imitation'),
               ),
             ],
           ),
@@ -293,7 +293,7 @@ class _PlayerBListeningScreenState extends State<PlayerBListeningScreen> {
           key: const ValueKey('player-b-recording-again'),
           onPressed: _controller.isBusy
               ? null
-              : () => unawaited(_controller.recordAnotherTake()),
+              : () => unawaited(_openImitationRecording()),
           icon: const Icon(Icons.refresh_rounded),
           label: const Text('Record another take'),
         ),
@@ -308,6 +308,24 @@ class _PlayerBListeningScreenState extends State<PlayerBListeningScreen> {
         ),
       ],
     );
+  }
+
+  Future<void> _openImitationRecording() async {
+    try {
+      await _controller.stopPlayback();
+      if (!mounted) {
+        return;
+      }
+      await Navigator.of(
+        context,
+      ).pushNamed(AppRouter.playerBImitationRecording, arguments: _controller);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open the recording stage: $error')),
+        );
+      }
+    }
   }
 
   Future<void> _confirmImitation(AudioClip imitation) async {

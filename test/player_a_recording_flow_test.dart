@@ -155,6 +155,52 @@ void main() {
     );
   });
 
+  testWidgets(
+    'playback waveform follows real PCM position and returns idle when stopped',
+    (WidgetTester tester) async {
+      final audio = _FakeRecordingAudio();
+      final controller = PlayerARecordingController(
+        audio: audio,
+        permissionGateway: _FakePermissionGateway(),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.dark,
+          home: PlayerARecordingScreen(controller: controller),
+        ),
+      );
+      await _recordAndStop(tester);
+
+      expect(controller.playbackWaveform, hasLength(48));
+      expect(controller.playbackWaveform.any((level) => level > 0), isTrue);
+      expect(controller.playbackWaveformProgress, 0);
+      expect(
+        find.byKey(const ValueKey('recording-playback-visualizer')),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('recording-playback-toggle')));
+      await tester.pump();
+      audio.emitPosition(const Duration(seconds: 1));
+      await tester.pump();
+      expect(controller.playbackWaveformProgress, closeTo(0.5, 0.01));
+
+      await tester.tap(find.byKey(const ValueKey('recording-playback-toggle')));
+      await tester.pump();
+      expect(controller.playbackWaveformProgress, 0);
+
+      audio.completePlayback();
+      await tester.pump();
+      expect(controller.playbackPosition, controller.clip!.duration);
+      expect(controller.playbackWaveformProgress, 0);
+
+      await tester.tap(find.byKey(const ValueKey('recording-playback-toggle')));
+      await tester.pump();
+      expect(controller.playbackWaveformProgress, 0);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets('re-record discards the previous clip and starts a new take', (
     WidgetTester tester,
   ) async {
@@ -499,6 +545,9 @@ AudioClip _makeWavClip(Duration duration) {
   header.setUint16(34, 16, Endian.little);
   wav.setRange(36, 40, [100, 97, 116, 97]);
   header.setUint32(40, pcmLength, Endian.little);
+  for (var index = 0; index < pcmLength ~/ 2; index++) {
+    header.setInt16(44 + index * 2, ((index % 8) + 1) * 3000, Endian.little);
+  }
   return AudioClip(
     data: wav,
     duration: duration,
