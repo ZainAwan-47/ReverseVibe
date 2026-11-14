@@ -2,12 +2,17 @@ import 'package:flutter/material.dart';
 
 import '../features/home/presentation/screens/home_screen.dart';
 import '../features/home/presentation/screens/how_to_play_screen.dart';
+import '../features/recording/presentation/screens/original_ready_screen.dart';
+import '../features/recording/presentation/screens/player_a_recording_screen.dart';
 import '../features/splash/presentation/screens/splash_screen.dart';
+import '../features/audio/domain/models/audio_clip.dart';
 
 abstract final class AppRouter {
   static const splash = '/splash';
   static const home = '/';
   static const howToPlay = '/how-to-play';
+  static const playerARecording = '/record-player-a';
+  static const originalReady = '/original-ready';
 
   static Route<dynamic>? onGenerateRoute(RouteSettings settings) {
     final Widget page;
@@ -18,6 +23,14 @@ abstract final class AppRouter {
         page = const HomeScreen();
       case howToPlay:
         page = const HowToPlayScreen();
+      case playerARecording:
+        page = const PlayerARecordingScreen();
+      case originalReady:
+        final clip = settings.arguments;
+        if (clip is! AudioClip) {
+          return null;
+        }
+        page = OriginalReadyScreen(clip: clip);
       default:
         return null;
     }

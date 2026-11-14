@@ -100,7 +100,8 @@ class _HomeContent extends StatelessWidget {
           const _ExperienceCard(),
           const SizedBox(height: 28),
           FilledButton.icon(
-            onPressed: () => _showChallengeNotice(context),
+            onPressed: () =>
+                Navigator.of(context).pushNamed(AppRouter.playerARecording),
             icon: const Icon(Icons.play_arrow_rounded, size: 22),
             label: const Text('Start Challenge'),
           ),
@@ -118,30 +119,6 @@ class _HomeContent extends StatelessWidget {
               textAlign: TextAlign.center,
               style: textTheme.bodyMedium?.copyWith(fontSize: 13),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showChallengeNotice(BuildContext context) {
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        icon: const Icon(
-          Icons.hourglass_top_rounded,
-          color: AppColors.secondary,
-          size: 28,
-        ),
-        title: const Text('Challenge mode is coming soon'),
-        content: const Text(
-          'Recording and audio playback are not available yet. '
-          'For now, explore how the game will work.',
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Got it'),
           ),
         ],
       ),

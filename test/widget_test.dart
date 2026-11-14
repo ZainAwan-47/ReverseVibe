@@ -285,23 +285,6 @@ void main() {
     expect(find.text('Start Challenge'), findsOneWidget);
   });
 
-  testWidgets('challenge action explains that audio features are not ready', (
-    WidgetTester tester,
-  ) async {
-    await _pumpAppToHome(tester);
-
-    await tester.ensureVisible(find.text('Start Challenge'));
-    await tester.tap(find.text('Start Challenge'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Challenge mode is coming soon'), findsOneWidget);
-    expect(find.textContaining('not available yet'), findsOneWidget);
-
-    await tester.tap(find.text('Got it'));
-    await tester.pumpAndSettle();
-    expect(find.text('Challenge mode is coming soon'), findsNothing);
-  });
-
   testWidgets('home and instructions fit a compact phone viewport', (
     WidgetTester tester,
   ) async {
