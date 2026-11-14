@@ -56,14 +56,14 @@ class OriginalReadyScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 24),
                   Text(
-                    'Original recording ready',
+                    'Pass the sound to Player B',
                     textAlign: TextAlign.center,
                     style: textTheme.headlineMedium,
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    'Player A’s sound is ready for the next gameplay step. '
-                    'Reversing the audio will be available in a later phase.',
+                    'Player A’s original is ready. Player B will hear it '
+                    'played backwards and try to recreate the sound.',
                     textAlign: TextAlign.center,
                     style: textTheme.bodyLarge,
                   ),
@@ -93,11 +93,13 @@ class OriginalReadyScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 24),
-                  FilledButton(
+                  FilledButton.icon(
+                    key: const ValueKey('continue-to-player-b'),
                     onPressed: () => Navigator.of(
                       context,
-                    ).pushNamedAndRemoveUntil(AppRouter.home, (_) => false),
-                    child: const Text('Back to Home'),
+                    ).pushNamed(AppRouter.playerBListening, arguments: clip),
+                    icon: const Icon(Icons.headphones_rounded),
+                    label: const Text('Continue to Player B'),
                   ),
                 ],
               ),

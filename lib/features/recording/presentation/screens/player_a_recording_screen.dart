@@ -127,6 +127,8 @@ class _PlayerARecordingScreenState extends State<PlayerARecordingScreen> {
                               const SizedBox(height: 24),
                               _PlaybackCard(
                                 duration: clip.duration,
+                                position: _controller.playbackPosition,
+                                remaining: _controller.playbackRemaining,
                                 isPlaying: _controller.isPlaying,
                                 onToggle: () =>
                                     unawaited(_controller.togglePlayback()),
@@ -313,11 +315,15 @@ class _RecordingControl extends StatelessWidget {
 class _PlaybackCard extends StatelessWidget {
   const _PlaybackCard({
     required this.duration,
+    required this.position,
+    required this.remaining,
     required this.isPlaying,
     required this.onToggle,
   });
 
   final Duration duration;
+  final Duration position;
+  final Duration remaining;
   final bool isPlaying;
   final VoidCallback onToggle;
 
@@ -343,8 +349,35 @@ class _PlaybackCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('Original recording', style: textTheme.titleMedium),
-                  const SizedBox(height: 2),
-                  Text(_formatDuration(duration), style: textTheme.bodyMedium),
+                  const SizedBox(height: 8),
+                  LinearProgressIndicator(
+                    value: duration.inMicroseconds == 0
+                        ? 0
+                        : (position.inMicroseconds / duration.inMicroseconds)
+                              .clamp(0, 1)
+                              .toDouble(),
+                    minHeight: 3,
+                    borderRadius: BorderRadius.circular(4),
+                    backgroundColor: AppColors.border,
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _formatRemainingDuration(duration),
+                        style: textTheme.bodySmall,
+                      ),
+                      Text(
+                        _formatRemainingDuration(remaining),
+                        key: const ValueKey('recording-playback-remaining'),
+                        style: textTheme.bodySmall?.copyWith(
+                          color: AppColors.secondary,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -436,5 +469,15 @@ class _ErrorNotice extends StatelessWidget {
 String _formatDuration(Duration duration) {
   final minutes = duration.inMinutes.toString().padLeft(2, '0');
   final seconds = (duration.inSeconds % 60).toString().padLeft(2, '0');
+  return '$minutes:$seconds';
+}
+
+String _formatRemainingDuration(Duration duration) {
+  final wholeSeconds = duration.inMicroseconds <= 0
+      ? 0
+      : (duration.inMicroseconds + Duration.microsecondsPerSecond - 1) ~/
+            Duration.microsecondsPerSecond;
+  final minutes = (wholeSeconds ~/ 60).toString().padLeft(2, '0');
+  final seconds = (wholeSeconds % 60).toString().padLeft(2, '0');
   return '$minutes:$seconds';
 }

@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../features/home/presentation/screens/home_screen.dart';
 import '../features/home/presentation/screens/how_to_play_screen.dart';
+import '../features/recording/domain/player_b_imitation_result.dart';
 import '../features/recording/presentation/screens/original_ready_screen.dart';
+import '../features/recording/presentation/screens/player_b_imitation_ready_screen.dart';
+import '../features/recording/presentation/screens/player_b_listening_screen.dart';
 import '../features/recording/presentation/screens/player_a_recording_screen.dart';
 import '../features/splash/presentation/screens/splash_screen.dart';
 import '../features/audio/domain/models/audio_clip.dart';
@@ -13,6 +16,8 @@ abstract final class AppRouter {
   static const howToPlay = '/how-to-play';
   static const playerARecording = '/record-player-a';
   static const originalReady = '/original-ready';
+  static const playerBListening = '/player-b-listening';
+  static const playerBImitationReady = '/player-b-imitation-ready';
 
   static Route<dynamic>? onGenerateRoute(RouteSettings settings) {
     final Widget page;
@@ -31,6 +36,18 @@ abstract final class AppRouter {
           return null;
         }
         page = OriginalReadyScreen(clip: clip);
+      case playerBListening:
+        final clip = settings.arguments;
+        if (clip is! AudioClip) {
+          return null;
+        }
+        page = PlayerBListeningScreen(originalClip: clip);
+      case playerBImitationReady:
+        final result = settings.arguments;
+        if (result is! PlayerBImitationResult) {
+          return null;
+        }
+        page = PlayerBImitationReadyScreen(result: result);
       default:
         return null;
     }

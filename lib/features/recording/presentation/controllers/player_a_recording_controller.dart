@@ -31,6 +31,23 @@ class PlayerARecordingController extends ChangeNotifier {
         _setError('Playback failed. Try playing the recording again.');
       },
     );
+    _positionSubscription = audio.playbackPosition.listen(
+      _handlePlaybackPosition,
+      onError: (Object error, StackTrace stackTrace) {
+        _setError('Could not read the recording playback position.');
+      },
+    );
+    _completionSubscription = audio.playbackComplete.listen(
+      (_) => _handlePlaybackComplete(),
+      onError: (Object error, StackTrace stackTrace) {
+        _setError('Could not detect the end of playback.');
+      },
+    );
+    _recordingInterruptedSubscription = audio.recordingInterrupted.listen((_) {
+      if (isRecording) {
+        unawaited(stopRecording());
+      }
+    });
   }
 
   factory PlayerARecordingController.production() {
@@ -53,6 +70,16 @@ class PlayerARecordingController extends ChangeNotifier {
   Duration _elapsed = Duration.zero;
   Duration get elapsed => _elapsed;
 
+  Duration _playbackPosition = Duration.zero;
+  Duration get playbackPosition => _playbackPosition;
+  Duration get playbackRemaining {
+    final clip = _clip;
+    if (clip == null) {
+      return Duration.zero;
+    }
+    return clip.duration - _playbackPosition;
+  }
+
   String? _errorMessage;
   String? get errorMessage => _errorMessage;
 
@@ -65,6 +92,9 @@ class PlayerARecordingController extends ChangeNotifier {
   bool _closed = false;
   Timer? _recordingTimer;
   StreamSubscription<bool>? _playbackSubscription;
+  StreamSubscription<Duration>? _positionSubscription;
+  StreamSubscription<void>? _completionSubscription;
+  StreamSubscription<void>? _recordingInterruptedSubscription;
 
   bool get isRecording => _status == PlayerARecordingStatus.recording;
 
@@ -95,6 +125,7 @@ class PlayerARecordingController extends ChangeNotifier {
       await audio.stopPlayback();
       _clip = null;
       _elapsed = Duration.zero;
+      _playbackPosition = Duration.zero;
       await audio.startRecording();
       if (_closed) {
         await audio.stopRecording();
@@ -165,11 +196,16 @@ class PlayerARecordingController extends ChangeNotifier {
     try {
       if (_isPlaying) {
         await audio.pausePlayback();
+      } else if (_playbackPosition > Duration.zero &&
+          _playbackPosition < _clip!.duration) {
+        await audio.resumePlayback();
       } else {
         _errorMessage = null;
+        _playbackPosition = Duration.zero;
         await audio.play(_clip!);
       }
     } catch (error) {
+      _isPlaying = false;
       _setError('Playback failed: $error');
     }
   }
@@ -184,6 +220,7 @@ class PlayerARecordingController extends ChangeNotifier {
       await audio.stopPlayback();
       _clip = null;
       _elapsed = Duration.zero;
+      _playbackPosition = Duration.zero;
       _isPlaying = false;
       _errorMessage = null;
       _status = PlayerARecordingStatus.ready;
@@ -206,7 +243,14 @@ class PlayerARecordingController extends ChangeNotifier {
     }
   }
 
-  Future<void> stopPlayback() => audio.stopPlayback();
+  Future<void> stopPlayback() async {
+    await audio.stopPlayback();
+    _playbackPosition = Duration.zero;
+    _isPlaying = false;
+    if (!_closed) {
+      notifyListeners();
+    }
+  }
 
   Future<void> close() async {
     if (_closed) {
@@ -216,6 +260,9 @@ class PlayerARecordingController extends ChangeNotifier {
     _recordingTimer?.cancel();
     _recordingTimer = null;
     await _playbackSubscription?.cancel();
+    await _positionSubscription?.cancel();
+    await _completionSubscription?.cancel();
+    await _recordingInterruptedSubscription?.cancel();
     try {
       await audio.stopPlayback();
     } finally {
@@ -235,6 +282,28 @@ class PlayerARecordingController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _handlePlaybackPosition(Duration position) {
+    if (_closed) {
+      return;
+    }
+    final duration = _clip?.duration ?? Duration.zero;
+    _playbackPosition = Duration(
+      microseconds: position.inMicroseconds
+          .clamp(0, duration.inMicroseconds)
+          .toInt(),
+    );
+    notifyListeners();
+  }
+
+  void _handlePlaybackComplete() {
+    if (_closed) {
+      return;
+    }
+    _playbackPosition = _clip?.duration ?? Duration.zero;
+    _isPlaying = false;
+    notifyListeners();
+  }
+
   void _setError(String message) {
     if (_closed) {
       return;
@@ -248,6 +317,9 @@ class PlayerARecordingController extends ChangeNotifier {
     final text = error.toString().toLowerCase();
     if (text.contains('no audio') || text.contains('too short')) {
       return 'No usable audio was captured. Record again and try speaking.';
+    }
+    if (text.contains('interrupted')) {
+      return 'Recording was interrupted. Try recording again.';
     }
     return 'Recording failed: $error';
   }

@@ -5,13 +5,20 @@ import 'dart:typed_data';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:record/record.dart';
 import 'package:reverse_vibe/features/audio/domain/models/audio_clip.dart';
+import 'package:reverse_vibe/features/audio/domain/pcm16_audio_meter.dart';
 
 import '../domain/player_a_recording_audio.dart';
 
 class InMemoryPlayerARecordingAudio implements PlayerARecordingAudio {
   InMemoryPlayerARecordingAudio({AudioRecorder? recorder, AudioPlayer? player})
     : _recorder = recorder ?? AudioRecorder(),
-      _player = player ?? AudioPlayer();
+      _player = player ?? AudioPlayer(),
+      _recordingAmplitudeController = StreamController<double>.broadcast(
+        sync: true,
+      ),
+      _recordingInterruptedController = StreamController<void>.broadcast(
+        sync: true,
+      );
 
   static const _sampleRate = 44100;
   static const _channelCount = 1;
@@ -20,15 +27,31 @@ class InMemoryPlayerARecordingAudio implements PlayerARecordingAudio {
 
   final AudioRecorder _recorder;
   final AudioPlayer _player;
+  final StreamController<double> _recordingAmplitudeController;
+  final StreamController<void> _recordingInterruptedController;
   BytesBuilder? _pcmBuffer;
   StreamSubscription<Uint8List>? _recordingSubscription;
   Completer<void>? _streamClosed;
   Object? _streamError;
+  bool _stoppingRecording = false;
   bool _disposed = false;
 
   @override
   Stream<bool> get playbackState =>
       _player.onPlayerStateChanged.map((state) => state == PlayerState.playing);
+
+  @override
+  Stream<Duration> get playbackPosition => _player.onPositionChanged;
+
+  @override
+  Stream<void> get playbackComplete => _player.onPlayerComplete;
+
+  @override
+  Stream<double> get recordingAmplitude => _recordingAmplitudeController.stream;
+
+  @override
+  Stream<void> get recordingInterrupted =>
+      _recordingInterruptedController.stream;
 
   @override
   Future<void> startRecording() async {
@@ -53,14 +76,26 @@ class InMemoryPlayerARecordingAudio implements PlayerARecordingAudio {
     _streamClosed = streamClosed;
     _streamError = null;
     _recordingSubscription = stream.listen(
-      buffer.add,
+      (chunk) {
+        buffer.add(chunk);
+        if (!_recordingAmplitudeController.isClosed) {
+          _recordingAmplitudeController.add(
+            Pcm16AudioMeter.normalizedRms(chunk),
+          );
+        }
+      },
       onError: (Object error, StackTrace stackTrace) {
         _streamError = error;
+        _signalRecordingInterruption();
         if (!streamClosed.isCompleted) {
           streamClosed.complete();
         }
       },
       onDone: () {
+        if (!_stoppingRecording) {
+          _streamError ??= StateError('Audio capture was interrupted.');
+          _signalRecordingInterruption();
+        }
         if (!streamClosed.isCompleted) {
           streamClosed.complete();
         }
@@ -79,6 +114,7 @@ class InMemoryPlayerARecordingAudio implements PlayerARecordingAudio {
     }
 
     try {
+      _stoppingRecording = true;
       await _recorder.stop();
       await streamClosed.future.timeout(const Duration(seconds: 3));
       if (_streamError case final error?) {
@@ -114,6 +150,7 @@ class InMemoryPlayerARecordingAudio implements PlayerARecordingAudio {
       _pcmBuffer = null;
       _streamClosed = null;
       _streamError = null;
+      _stoppingRecording = false;
     }
   }
 
@@ -135,6 +172,12 @@ class InMemoryPlayerARecordingAudio implements PlayerARecordingAudio {
   }
 
   @override
+  Future<void> resumePlayback() async {
+    _ensureNotDisposed();
+    await _player.resume();
+  }
+
+  @override
   Future<void> stopPlayback() async {
     _ensureNotDisposed();
     await _player.stop();
@@ -147,6 +190,7 @@ class InMemoryPlayerARecordingAudio implements PlayerARecordingAudio {
     }
     try {
       if (_recordingSubscription != null) {
+        _stoppingRecording = true;
         await _recorder.stop();
         await _streamClosed?.future.timeout(const Duration(seconds: 3));
       }
@@ -157,6 +201,8 @@ class InMemoryPlayerARecordingAudio implements PlayerARecordingAudio {
       } finally {
         await _recordingSubscription?.cancel();
         await _recorder.dispose();
+        await _recordingAmplitudeController.close();
+        await _recordingInterruptedController.close();
         _pcmBuffer = null;
         _recordingSubscription = null;
         _streamClosed = null;
@@ -191,6 +237,12 @@ class InMemoryPlayerARecordingAudio implements PlayerARecordingAudio {
   void _ensureNotDisposed() {
     if (_disposed) {
       throw StateError('The audio service has already been disposed.');
+    }
+  }
+
+  void _signalRecordingInterruption() {
+    if (!_stoppingRecording && !_recordingInterruptedController.isClosed) {
+      _recordingInterruptedController.add(null);
     }
   }
 }

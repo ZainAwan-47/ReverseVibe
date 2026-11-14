@@ -7,8 +7,10 @@ import 'package:reverse_vibe/features/audio/domain/models/audio_clip.dart';
 import 'package:reverse_vibe/features/home/presentation/screens/home_screen.dart';
 import 'package:reverse_vibe/features/recording/domain/microphone_permission_gateway.dart';
 import 'package:reverse_vibe/features/recording/domain/player_a_recording_audio.dart';
+import 'package:reverse_vibe/features/recording/presentation/controllers/player_b_listening_controller.dart';
 import 'package:reverse_vibe/features/recording/presentation/controllers/player_a_recording_controller.dart';
 import 'package:reverse_vibe/features/recording/presentation/screens/original_ready_screen.dart';
+import 'package:reverse_vibe/features/recording/presentation/screens/player_b_listening_screen.dart';
 import 'package:reverse_vibe/features/recording/presentation/screens/player_a_recording_screen.dart';
 import 'package:reverse_vibe/navigation/app_router.dart';
 import 'package:reverse_vibe/theme/app_theme.dart';
@@ -95,6 +97,64 @@ void main() {
     expect(find.byTooltip('Play recording'), findsOneWidget);
   });
 
+  testWidgets('playback countdown follows position and completes at zero', (
+    WidgetTester tester,
+  ) async {
+    final audio = _FakeRecordingAudio();
+    await tester.pumpWidget(_recordingApp(audio, _FakePermissionGateway()));
+    await _recordAndStop(tester);
+
+    expect(
+      find.byKey(const ValueKey('recording-playback-remaining')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(const ValueKey('recording-playback-remaining')),
+          )
+          .data,
+      '00:02',
+    );
+
+    await tester.tap(find.byKey(const ValueKey('recording-playback-toggle')));
+    await tester.pump();
+    audio.emitPosition(const Duration(milliseconds: 1500));
+    await tester.pump();
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(const ValueKey('recording-playback-remaining')),
+          )
+          .data,
+      '00:01',
+    );
+
+    audio.completePlayback();
+    await tester.pump();
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(const ValueKey('recording-playback-remaining')),
+          )
+          .data,
+      '00:00',
+    );
+    expect(find.byTooltip('Play recording'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('recording-playback-toggle')));
+    await tester.pump();
+    expect(audio.playCount, 2);
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(const ValueKey('recording-playback-remaining')),
+          )
+          .data,
+      '00:02',
+    );
+  });
+
   testWidgets('re-record discards the previous clip and starts a new take', (
     WidgetTester tester,
   ) async {
@@ -154,11 +214,11 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('recording-confirm')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Original recording ready'), findsOneWidget);
-    expect(
-      find.textContaining('Reversing the audio will be available'),
-      findsOneWidget,
-    );
+    expect(find.text('Pass the sound to Player B'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('continue-to-player-b')));
+    await tester.pumpAndSettle();
+    expect(find.text('PLAYER B'), findsOneWidget);
+    expect(find.text('Player A’s sound, reversed'), findsOneWidget);
   });
 
   testWidgets('Home Start Challenge opens Player A recording', (
@@ -264,6 +324,20 @@ Widget _recordingApp(
           builder: (_) => OriginalReadyScreen(clip: arguments),
         );
       }
+      if (settings.name == AppRouter.playerBListening &&
+          arguments is AudioClip) {
+        return MaterialPageRoute<void>(
+          settings: settings,
+          builder: (_) => PlayerBListeningScreen(
+            originalClip: arguments,
+            controller: PlayerBListeningController(
+              originalClip: arguments,
+              audio: _FakeRecordingAudio(),
+              permissionGateway: _FakePermissionGateway(),
+            ),
+          ),
+        );
+      }
       return AppRouter.onGenerateRoute(settings);
     },
   );
@@ -293,27 +367,52 @@ class _FakeRecordingAudio implements PlayerARecordingAudio {
   _FakeRecordingAudio({
     this.stopError,
     Duration recordingDuration = const Duration(seconds: 2),
-  }) : _clip = AudioClip(
-         data: Uint8List(46),
-         duration: recordingDuration,
-         mimeType: 'audio/wav',
-         sampleRate: 44100,
-         channelCount: 1,
-       );
+  }) : _clip = _makeWavClip(recordingDuration);
 
   final AudioClip _clip;
   final Object? stopError;
   final StreamController<bool> _playbackController =
       StreamController<bool>.broadcast(sync: true);
+  final StreamController<Duration> _positionController =
+      StreamController<Duration>.broadcast(sync: true);
+  final StreamController<void> _completionController =
+      StreamController<void>.broadcast(sync: true);
+  final StreamController<double> _amplitudeController =
+      StreamController<double>.broadcast(sync: true);
+  final StreamController<void> _interruptedController =
+      StreamController<void>.broadcast(sync: true);
   int startCount = 0;
   int stopCount = 0;
   int playCount = 0;
   int pauseCount = 0;
+  int resumeCount = 0;
   bool disposed = false;
   bool _recording = false;
 
   @override
   Stream<bool> get playbackState => _playbackController.stream;
+
+  @override
+  Stream<Duration> get playbackPosition => _positionController.stream;
+
+  @override
+  Stream<void> get playbackComplete => _completionController.stream;
+
+  @override
+  Stream<double> get recordingAmplitude => _amplitudeController.stream;
+
+  @override
+  Stream<void> get recordingInterrupted => _interruptedController.stream;
+
+  void emitPosition(Duration position) => _positionController.add(position);
+
+  void emitAmplitude(double amplitude) => _amplitudeController.add(amplitude);
+
+  void completePlayback() {
+    _positionController.add(_clip.duration);
+    _completionController.add(null);
+    _playbackController.add(false);
+  }
 
   @override
   Future<void> startRecording() async {
@@ -350,6 +449,12 @@ class _FakeRecordingAudio implements PlayerARecordingAudio {
   }
 
   @override
+  Future<void> resumePlayback() async {
+    resumeCount++;
+    _playbackController.add(true);
+  }
+
+  @override
   Future<void> stopPlayback() async {
     _playbackController.add(false);
   }
@@ -362,5 +467,43 @@ class _FakeRecordingAudio implements PlayerARecordingAudio {
       stopCount++;
     }
     await _playbackController.close();
+    await _positionController.close();
+    await _completionController.close();
+    await _amplitudeController.close();
+    await _interruptedController.close();
   }
+}
+
+AudioClip _makeWavClip(Duration duration) {
+  const sampleRate = 4;
+  const channels = 1;
+  const bytesPerSample = 2;
+  final pcmLength =
+      duration.inMicroseconds *
+      sampleRate *
+      channels *
+      bytesPerSample ~/
+      Duration.microsecondsPerSecond;
+  final wav = Uint8List(44 + pcmLength);
+  final header = ByteData.sublistView(wav);
+  wav.setRange(0, 4, [82, 73, 70, 70]);
+  header.setUint32(4, wav.length - 8, Endian.little);
+  wav.setRange(8, 12, [87, 65, 86, 69]);
+  wav.setRange(12, 16, [102, 109, 116, 32]);
+  header.setUint32(16, 16, Endian.little);
+  header.setUint16(20, 1, Endian.little);
+  header.setUint16(22, channels, Endian.little);
+  header.setUint32(24, sampleRate, Endian.little);
+  header.setUint32(28, sampleRate * channels * bytesPerSample, Endian.little);
+  header.setUint16(32, channels * bytesPerSample, Endian.little);
+  header.setUint16(34, 16, Endian.little);
+  wav.setRange(36, 40, [100, 97, 116, 97]);
+  header.setUint32(40, pcmLength, Endian.little);
+  return AudioClip(
+    data: wav,
+    duration: duration,
+    mimeType: 'audio/wav',
+    sampleRate: sampleRate,
+    channelCount: channels,
+  );
 }
