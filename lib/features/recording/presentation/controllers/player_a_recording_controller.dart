@@ -102,6 +102,8 @@ class PlayerARecordingController extends ChangeNotifier {
   bool _isBusy = false;
   bool get isBusy => _isBusy;
 
+  bool _isSeeking = false;
+  Future<void>? _seekInFlight;
   bool _closed = false;
   Timer? _recordingTimer;
   StreamSubscription<bool>? _playbackSubscription;
@@ -207,8 +209,44 @@ class PlayerARecordingController extends ChangeNotifier {
     }
   }
 
+  Future<void> seekPlayback(Duration position) async {
+    final clip = _clip;
+    if (_closed ||
+        clip == null ||
+        _isBusy ||
+        _isSeeking ||
+        isRecording ||
+        clip.duration <= Duration.zero) {
+      return;
+    }
+
+    final boundedPosition = Duration(
+      microseconds: position.inMicroseconds
+          .clamp(0, clip.duration.inMicroseconds)
+          .toInt(),
+    );
+    _isSeeking = true;
+    _playbackPosition = boundedPosition;
+    _errorMessage = null;
+    final seekFinished = Completer<void>();
+    _seekInFlight = seekFinished.future;
+    notifyListeners();
+    try {
+      await audio.seek(clip, boundedPosition);
+    } catch (error) {
+      _errorMessage = 'Could not seek playback: $error';
+    } finally {
+      _isSeeking = false;
+      if (!_closed) {
+        notifyListeners();
+      }
+      seekFinished.complete();
+      _seekInFlight = null;
+    }
+  }
+
   Future<void> togglePlayback() async {
-    if (_closed || _clip == null || _isBusy || isRecording) {
+    if (_closed || _clip == null || _isBusy || _isSeeking || isRecording) {
       return;
     }
 
@@ -264,6 +302,7 @@ class PlayerARecordingController extends ChangeNotifier {
   }
 
   Future<void> stopPlayback() async {
+    await _seekInFlight;
     await audio.stopPlayback();
     _playbackPosition = Duration.zero;
     _isPlaying = false;
@@ -279,6 +318,7 @@ class PlayerARecordingController extends ChangeNotifier {
     _closed = true;
     _recordingTimer?.cancel();
     _recordingTimer = null;
+    await _seekInFlight;
     await _playbackSubscription?.cancel();
     await _positionSubscription?.cancel();
     await _completionSubscription?.cancel();
@@ -289,6 +329,11 @@ class PlayerARecordingController extends ChangeNotifier {
       try {
         await audio.dispose();
       } finally {
+        _clip = null;
+        _playbackWaveform = const [];
+        _elapsed = Duration.zero;
+        _playbackPosition = Duration.zero;
+        _isPlaying = false;
         super.dispose();
       }
     }
@@ -303,7 +348,7 @@ class PlayerARecordingController extends ChangeNotifier {
   }
 
   void _handlePlaybackPosition(Duration position) {
-    if (_closed) {
+    if (_closed || _isSeeking) {
       return;
     }
     final duration = _clip?.duration ?? Duration.zero;

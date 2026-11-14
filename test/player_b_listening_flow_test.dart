@@ -8,9 +8,10 @@ import 'package:reverse_vibe/features/recording/domain/microphone_permission_gat
 import 'package:reverse_vibe/features/recording/domain/player_b_imitation_result.dart';
 import 'package:reverse_vibe/features/recording/domain/player_a_recording_audio.dart';
 import 'package:reverse_vibe/features/recording/presentation/controllers/player_b_listening_controller.dart';
-import 'package:reverse_vibe/features/recording/presentation/screens/player_b_imitation_ready_screen.dart';
+import 'package:reverse_vibe/features/recording/presentation/controllers/player_b_reconstructed_controller.dart';
 import 'package:reverse_vibe/features/recording/presentation/screens/player_b_imitation_recording_screen.dart';
 import 'package:reverse_vibe/features/recording/presentation/screens/player_b_listening_screen.dart';
+import 'package:reverse_vibe/features/recording/presentation/screens/player_b_reconstructed_screen.dart';
 import 'package:reverse_vibe/theme/app_theme.dart';
 
 void main() {
@@ -44,6 +45,10 @@ void main() {
 
       expect(find.text('Listen closely'), findsOneWidget);
       expect(find.text('Player A’s sound, reversed'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('player-b-reversed-playback-seekbar')),
+        findsOneWidget,
+      );
       expect(_samples(controller.reversedClip!), [
         16000,
         12000,
@@ -96,6 +101,21 @@ void main() {
         );
       }
       expect(audio.playCount, 3);
+      await controller.seekPlayback(
+        controller.reversedClip!,
+        const Duration(seconds: 1),
+      );
+      await tester.pump();
+      expect(audio.seekCalls.last.position, const Duration(seconds: 1));
+      expect(audio.playCount, 3);
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const ValueKey('player-b-reversed-playback-elapsed')),
+            )
+            .data,
+        '00:01',
+      );
 
       await tester.tap(find.byKey(const ValueKey('player-b-start-imitation')));
       await tester.pumpAndSettle();
@@ -125,6 +145,10 @@ void main() {
       expect(controller.status, PlayerBStatus.recorded);
       expect(find.text('Your imitation'), findsOneWidget);
       expect(
+        find.byKey(const ValueKey('player-b-imitation-playback-seekbar')),
+        findsOneWidget,
+      );
+      expect(
         tester
             .widget<Text>(
               find.byKey(
@@ -135,6 +159,17 @@ void main() {
         '00:02',
       );
 
+      await controller.seekPlayback(imitation, const Duration(seconds: 1));
+      await tester.pump();
+      expect(audio.seekCalls.last.clip, same(imitation));
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const ValueKey('player-b-imitation-playback-elapsed')),
+            )
+            .data,
+        '00:01',
+      );
       await tester.tap(
         find.byKey(const ValueKey('player-b-imitation-playback-toggle')),
       );
@@ -175,12 +210,14 @@ void main() {
       final audio = _FakeRecordingAudio(imitation: imitation);
       final controller = _controller(original, audio);
       PlayerBImitationResult? confirmedResult;
+      PlayerBReconstructedController? reconstructedController;
 
       await tester.pumpWidget(
         _app(
           original,
           controller,
           onConfirmed: (result) => confirmedResult = result,
+          onReconstructedController: (value) => reconstructedController = value,
         ),
       );
       await tester.pumpAndSettle();
@@ -215,15 +252,25 @@ void main() {
         find.byKey(const ValueKey('player-b-recording-confirm')),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Imitation confirmed'), findsOneWidget);
+      expect(find.text('Your reconstructed result'), findsOneWidget);
+      expect(find.text('Imitation confirmed'), findsNothing);
+      expect(find.text('Reverse imitation'), findsNothing);
       expect(confirmedResult, isNotNull);
       expect(confirmedResult!.imitationClip.data, imitation.data);
       expect(confirmedResult!.originalClip.data, original.data);
+      expect(reconstructedController, isNotNull);
+      expect(_samples(reconstructedController!.reconstructedClip!), [
+        18,
+        17,
+        16,
+        15,
+        14,
+        13,
+        12,
+        11,
+      ]);
 
-      await tester.ensureVisible(
-        find.byKey(const ValueKey('return-to-player-b')),
-      );
-      await tester.tap(find.byKey(const ValueKey('return-to-player-b')));
+      await tester.tap(find.byTooltip('Back'));
       await tester.pumpAndSettle();
       expect(find.text('PLAYER B'), findsOneWidget);
       expect(
@@ -316,6 +363,8 @@ Widget _app(
   AudioClip original,
   PlayerBListeningController controller, {
   void Function(PlayerBImitationResult result)? onConfirmed,
+  void Function(PlayerBReconstructedController controller)?
+  onReconstructedController,
 }) {
   return MaterialApp(
     theme: AppTheme.dark,
@@ -333,9 +382,15 @@ Widget _app(
       }
       if (result is PlayerBImitationResult) {
         onConfirmed?.call(result);
+        final reconstructedController = PlayerBReconstructedController(
+          result: result,
+          audio: _FakeRecordingAudio(imitation: result.imitationClip),
+        );
+        onReconstructedController?.call(reconstructedController);
         return MaterialPageRoute<void>(
           settings: settings,
-          builder: (_) => PlayerBImitationReadyScreen(result: result),
+          builder: (_) =>
+              PlayerBReconstructedScreen(controller: reconstructedController),
         );
       }
       return null;
@@ -417,6 +472,7 @@ class _FakeRecordingAudio implements PlayerARecordingAudio {
   final StreamController<void> _interruptedController =
       StreamController<void>.broadcast(sync: true);
   final List<AudioClip> playedClips = [];
+  final List<({AudioClip clip, Duration position})> seekCalls = [];
   int startCount = 0;
   int playCount = 0;
   bool _recording = false;
@@ -474,6 +530,12 @@ class _FakeRecordingAudio implements PlayerARecordingAudio {
     playedClips.add(clip);
     playCount++;
     _playbackController.add(true);
+  }
+
+  @override
+  Future<void> seek(AudioClip clip, Duration position) async {
+    seekCalls.add((clip: clip, position: position));
+    emitPosition(position);
   }
 
   @override

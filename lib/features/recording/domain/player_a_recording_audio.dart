@@ -17,6 +17,8 @@ abstract interface class PlayerARecordingAudio {
 
   Future<void> play(AudioClip clip);
 
+  Future<void> seek(AudioClip clip, Duration position);
+
   Future<void> pausePlayback();
 
   Future<void> resumePlayback();

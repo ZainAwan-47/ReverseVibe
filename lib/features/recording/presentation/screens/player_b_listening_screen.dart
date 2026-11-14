@@ -9,6 +9,7 @@ import 'package:reverse_vibe/theme/app_colors.dart';
 
 import '../../../../navigation/app_router.dart';
 import '../../domain/player_b_imitation_result.dart';
+import '../widgets/audio_playback_seek_bar.dart';
 
 class PlayerBListeningScreen extends StatefulWidget {
   const PlayerBListeningScreen({
@@ -123,16 +124,18 @@ class _PlayerBListeningScreenState extends State<PlayerBListeningScreen> {
                                 isPlaying: _controller.isClipPlaying(
                                   reversedClip,
                                 ),
-                                progress: _controller.playbackProgressFor(
-                                  reversedClip,
-                                ),
-                                remaining: _controller.playbackRemainingFor(
+                                position: _controller.playbackPositionFor(
                                   reversedClip,
                                 ),
                                 onToggle: () => unawaited(
                                   _controller.togglePlayback(reversedClip),
                                 ),
+                                onSeek: (position) => _controller.seekPlayback(
+                                  reversedClip,
+                                  position,
+                                ),
                                 keyPrefix: 'player-b-reversed',
+                                canSeek: !_controller.isBusy,
                               ),
                               const SizedBox(height: 20),
                               _recordingSection(
@@ -276,10 +279,11 @@ class _PlayerBListeningScreenState extends State<PlayerBListeningScreen> {
           title: 'Your imitation',
           clip: imitation,
           isPlaying: _controller.isClipPlaying(imitation),
-          progress: _controller.playbackProgressFor(imitation),
-          remaining: _controller.playbackRemainingFor(imitation),
+          position: _controller.playbackPositionFor(imitation),
           onToggle: () => unawaited(_controller.togglePlayback(imitation)),
+          onSeek: (position) => _controller.seekPlayback(imitation, position),
           keyPrefix: 'player-b-imitation',
+          canSeek: !_controller.isBusy,
         ),
         const SizedBox(height: 14),
         OutlinedButton.icon(
@@ -341,7 +345,7 @@ class _PlayerBListeningScreenState extends State<PlayerBListeningScreen> {
       );
       await Navigator.of(
         context,
-      ).pushNamed(AppRouter.playerBImitationReady, arguments: result);
+      ).pushReplacementNamed(AppRouter.playerBReconstructed, arguments: result);
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -357,19 +361,21 @@ class _PlaybackCard extends StatelessWidget {
     required this.title,
     required this.clip,
     required this.isPlaying,
-    required this.progress,
-    required this.remaining,
+    required this.position,
     required this.onToggle,
+    required this.onSeek,
     required this.keyPrefix,
+    required this.canSeek,
   });
 
   final String title;
   final AudioClip clip;
   final bool isPlaying;
-  final double progress;
-  final Duration remaining;
+  final Duration position;
   final VoidCallback onToggle;
+  final Future<void> Function(Duration position) onSeek;
   final String keyPrefix;
+  final bool canSeek;
 
   @override
   Widget build(BuildContext context) {
@@ -394,29 +400,12 @@ class _PlaybackCard extends StatelessWidget {
                 children: [
                   Text(title, style: textTheme.titleMedium),
                   const SizedBox(height: 8),
-                  LinearProgressIndicator(
-                    value: progress,
-                    minHeight: 3,
-                    borderRadius: BorderRadius.circular(4),
-                    backgroundColor: AppColors.border,
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        _formatRemainingDuration(clip.duration),
-                        style: textTheme.bodySmall,
-                      ),
-                      Text(
-                        _formatRemainingDuration(remaining),
-                        key: ValueKey('$keyPrefix-playback-remaining'),
-                        style: textTheme.bodySmall?.copyWith(
-                          color: AppColors.secondary,
-                          fontFeatures: const [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                    ],
+                  AudioPlaybackSeekBar(
+                    duration: clip.duration,
+                    position: position,
+                    onSeek: onSeek,
+                    keyPrefix: keyPrefix,
+                    enabled: canSeek,
                   ),
                 ],
               ),
@@ -619,15 +608,5 @@ String _formatDuration(Duration duration) {
   final safeSeconds = duration.inSeconds.clamp(0, 359999);
   final minutes = (safeSeconds ~/ 60).toString().padLeft(2, '0');
   final seconds = (safeSeconds % 60).toString().padLeft(2, '0');
-  return '$minutes:$seconds';
-}
-
-String _formatRemainingDuration(Duration duration) {
-  final wholeSeconds = duration.inMicroseconds <= 0
-      ? 0
-      : (duration.inMicroseconds + Duration.microsecondsPerSecond - 1) ~/
-            Duration.microsecondsPerSecond;
-  final minutes = (wholeSeconds ~/ 60).toString().padLeft(2, '0');
-  final seconds = (wholeSeconds % 60).toString().padLeft(2, '0');
   return '$minutes:$seconds';
 }

@@ -2,25 +2,29 @@ import 'package:flutter/material.dart';
 import 'package:reverse_vibe/features/audio/domain/models/audio_clip.dart';
 import 'package:reverse_vibe/theme/app_colors.dart';
 
+import 'audio_playback_seek_bar.dart';
+
 class Phase6PlaybackCard extends StatelessWidget {
   const Phase6PlaybackCard({
     required this.title,
     required this.clip,
     required this.isPlaying,
-    required this.progress,
-    required this.remaining,
+    required this.position,
     required this.onToggle,
+    required this.onSeek,
     required this.keyPrefix,
+    this.canSeek = true,
     super.key,
   });
 
   final String title;
   final AudioClip clip;
   final bool isPlaying;
-  final double progress;
-  final Duration remaining;
+  final Duration position;
   final VoidCallback onToggle;
+  final Future<void> Function(Duration position) onSeek;
   final String keyPrefix;
+  final bool canSeek;
 
   @override
   Widget build(BuildContext context) {
@@ -45,29 +49,12 @@ class Phase6PlaybackCard extends StatelessWidget {
                 children: [
                   Text(title, style: textTheme.titleMedium),
                   const SizedBox(height: 8),
-                  LinearProgressIndicator(
-                    value: progress,
-                    minHeight: 3,
-                    borderRadius: BorderRadius.circular(4),
-                    backgroundColor: AppColors.border,
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        _formatRemainingDuration(clip.duration),
-                        style: textTheme.bodySmall,
-                      ),
-                      Text(
-                        _formatRemainingDuration(remaining),
-                        key: ValueKey('$keyPrefix-playback-remaining'),
-                        style: textTheme.bodySmall?.copyWith(
-                          color: AppColors.secondary,
-                          fontFeatures: const [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                    ],
+                  AudioPlaybackSeekBar(
+                    duration: clip.duration,
+                    position: position,
+                    onSeek: onSeek,
+                    keyPrefix: keyPrefix,
+                    enabled: canSeek,
                   ),
                 ],
               ),
@@ -83,14 +70,4 @@ class Phase6PlaybackCard extends StatelessWidget {
       ),
     );
   }
-}
-
-String _formatRemainingDuration(Duration duration) {
-  final wholeSeconds = duration.inMicroseconds <= 0
-      ? 0
-      : (duration.inMicroseconds + Duration.microsecondsPerSecond - 1) ~/
-            Duration.microsecondsPerSecond;
-  final minutes = (wholeSeconds ~/ 60).toString().padLeft(2, '0');
-  final seconds = (wholeSeconds % 60).toString().padLeft(2, '0');
-  return '$minutes:$seconds';
 }

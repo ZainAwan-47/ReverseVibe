@@ -32,7 +32,10 @@ class _PlayerBReconstructedScreenState
   @override
   void dispose() {
     unawaited(
-      _controller.close().catchError((Object error, StackTrace stackTrace) {
+      _controller.close(clearChallenge: true).catchError((
+        Object error,
+        StackTrace stackTrace,
+      ) {
         FlutterError.reportError(
           FlutterErrorDetails(
             exception: error,
@@ -51,6 +54,9 @@ class _PlayerBReconstructedScreenState
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
+        if (!_controller.hasChallengeAudio) {
+          return const SizedBox.shrink();
+        }
         final clip = _controller.reconstructedClip;
         final textTheme = Theme.of(context).textTheme;
         return PopScope<Object?>(
@@ -101,37 +107,40 @@ class _PlayerBReconstructedScreenState
                         const SizedBox(height: 28),
                         if (_controller.isPreparing)
                           const _PreparingNotice()
-                        else if (_controller.errorMessage case final message?)
-                          _ErrorNotice(message: message)
                         else if (clip case final reconstructed?)
                           Phase6PlaybackCard(
                             title: 'Player B’s reconstructed sound',
                             clip: reconstructed,
                             isPlaying: _controller.isClipPlaying(reconstructed),
-                            progress: _controller.playbackProgressFor(
-                              reconstructed,
-                            ),
-                            remaining: _controller.playbackRemainingFor(
+                            position: _controller.playbackPositionFor(
                               reconstructed,
                             ),
                             onToggle: () => unawaited(
                               _controller.togglePlayback(reconstructed),
                             ),
+                            onSeek: (position) => _controller.seekPlayback(
+                              reconstructed,
+                              position,
+                            ),
                             keyPrefix: 'player-b-reconstructed',
+                            canSeek: !_controller.isBusy,
                           ),
+                        if (!_controller.isPreparing)
+                          if (_controller.errorMessage case final message?)
+                            _ErrorNotice(message: message),
                         if (clip != null) ...[
                           const SizedBox(height: 22),
                           FilledButton.icon(
-                            key: const ValueKey('ask-player-a-confirmation'),
+                            key: const ValueKey('reveal-it'),
                             onPressed:
                                 _controller.isBusy ||
                                     !_controller.hasListenedToReconstructed
                                 ? null
-                                : () => unawaited(_askPlayerA()),
-                            icon: const Icon(Icons.question_answer_outlined),
+                                : () => unawaited(_reveal()),
+                            icon: const Icon(Icons.lock_open_rounded),
                             label: Text(
                               _controller.hasListenedToReconstructed
-                                  ? 'Ask Player A to confirm'
+                                  ? 'Reveal it'
                                   : 'Listen through to continue',
                             ),
                           ),
@@ -148,7 +157,7 @@ class _PlayerBReconstructedScreenState
     );
   }
 
-  Future<void> _askPlayerA() async {
+  Future<void> _reveal() async {
     try {
       await _controller.stopPlayback();
       if (!mounted) {
@@ -156,11 +165,11 @@ class _PlayerBReconstructedScreenState
       }
       await Navigator.of(
         context,
-      ).pushNamed(AppRouter.playerAConfirmation, arguments: _controller);
+      ).pushNamed(AppRouter.playerBFinalReveal, arguments: _controller);
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not continue to confirmation: $error')),
+          SnackBar(content: Text('Could not reveal the original: $error')),
         );
       }
     }

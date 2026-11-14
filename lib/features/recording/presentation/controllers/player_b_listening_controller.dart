@@ -21,11 +21,12 @@ enum PlayerBStatus {
 
 class PlayerBListeningController extends ChangeNotifier {
   PlayerBListeningController({
-    required this.originalClip,
+    required AudioClip originalClip,
     required this.audio,
     required this.permissionGateway,
     this.maxDuration = const Duration(seconds: 60),
   }) {
+    _originalClip = originalClip;
     _playbackSubscription = audio.playbackState.listen(
       _handlePlaybackState,
       onError: (Object error, StackTrace stackTrace) {
@@ -69,7 +70,13 @@ class PlayerBListeningController extends ChangeNotifier {
     );
   }
 
-  final AudioClip originalClip;
+  AudioClip? _originalClip;
+  AudioClip get originalClip =>
+      _originalClip ?? (throw StateError('Challenge audio was cleared.'));
+
+  bool get hasChallengeAudio =>
+      _originalClip != null || _reversedClip != null || _imitation != null;
+
   final PlayerARecordingAudio audio;
   final MicrophonePermissionGateway permissionGateway;
   final Duration maxDuration;
@@ -92,6 +99,8 @@ class PlayerBListeningController extends ChangeNotifier {
   bool _isBusy = false;
   bool get isBusy => _isBusy;
 
+  bool _isSeeking = false;
+  Future<void>? _seekInFlight;
   bool _closed = false;
   Duration _elapsed = Duration.zero;
   Duration get elapsed => _elapsed;
@@ -241,7 +250,7 @@ class PlayerBListeningController extends ChangeNotifier {
   }
 
   Future<void> togglePlayback(AudioClip clip) async {
-    if (_closed || _isBusy || isRecording) {
+    if (_closed || _isBusy || _isSeeking || isRecording) {
       return;
     }
     try {
@@ -262,6 +271,38 @@ class PlayerBListeningController extends ChangeNotifier {
       _isPlaying = false;
       _errorMessage = 'Playback failed: $error';
       _notify();
+    }
+  }
+
+  Future<void> seekPlayback(AudioClip clip, Duration position) async {
+    if (_closed ||
+        _isBusy ||
+        _isSeeking ||
+        isRecording ||
+        clip.duration <= Duration.zero) {
+      return;
+    }
+    final boundedPosition = Duration(
+      microseconds: position.inMicroseconds
+          .clamp(0, clip.duration.inMicroseconds)
+          .toInt(),
+    );
+    _isSeeking = true;
+    _activeClip = clip;
+    _playbackPosition = boundedPosition;
+    _errorMessage = null;
+    final seekFinished = Completer<void>();
+    _seekInFlight = seekFinished.future;
+    _notify();
+    try {
+      await audio.seek(clip, boundedPosition);
+    } catch (error) {
+      _errorMessage = 'Could not seek playback: $error';
+    } finally {
+      _isSeeking = false;
+      _notify();
+      seekFinished.complete();
+      _seekInFlight = null;
     }
   }
 
@@ -305,6 +346,7 @@ class PlayerBListeningController extends ChangeNotifier {
   }
 
   Future<void> stopPlayback() async {
+    await _seekInFlight;
     await audio.stopPlayback();
     _activeClip = null;
     _playbackPosition = Duration.zero;
@@ -319,6 +361,7 @@ class PlayerBListeningController extends ChangeNotifier {
     _closed = true;
     _recordingTimer?.cancel();
     _recordingTimer = null;
+    await _seekInFlight;
     await _playbackSubscription?.cancel();
     await _positionSubscription?.cancel();
     await _completionSubscription?.cancel();
@@ -330,6 +373,16 @@ class PlayerBListeningController extends ChangeNotifier {
       try {
         await audio.dispose();
       } finally {
+        _originalClip = null;
+        _reversedClip = null;
+        _imitation = null;
+        _activeClip = null;
+        _playbackPosition = Duration.zero;
+        _elapsed = Duration.zero;
+        _amplitude = 0;
+        _latestAmplitude = 0;
+        _amplitudeHistory.clear();
+        _isPlaying = false;
         super.dispose();
       }
     }
@@ -372,7 +425,7 @@ class PlayerBListeningController extends ChangeNotifier {
   }
 
   void _handlePlaybackPosition(Duration position) {
-    if (_closed) {
+    if (_closed || _isSeeking) {
       return;
     }
     final duration = _activeClip?.duration ?? Duration.zero;

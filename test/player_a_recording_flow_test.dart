@@ -9,7 +9,6 @@ import 'package:reverse_vibe/features/recording/domain/microphone_permission_gat
 import 'package:reverse_vibe/features/recording/domain/player_a_recording_audio.dart';
 import 'package:reverse_vibe/features/recording/presentation/controllers/player_b_listening_controller.dart';
 import 'package:reverse_vibe/features/recording/presentation/controllers/player_a_recording_controller.dart';
-import 'package:reverse_vibe/features/recording/presentation/screens/original_ready_screen.dart';
 import 'package:reverse_vibe/features/recording/presentation/screens/player_b_listening_screen.dart';
 import 'package:reverse_vibe/features/recording/presentation/screens/player_a_recording_screen.dart';
 import 'package:reverse_vibe/navigation/app_router.dart';
@@ -156,6 +155,64 @@ void main() {
   });
 
   testWidgets(
+    'playback seeking clamps, updates time, and preserves play state',
+    (WidgetTester tester) async {
+      final audio = _FakeRecordingAudio();
+      final controller = PlayerARecordingController(
+        audio: audio,
+        permissionGateway: _FakePermissionGateway(),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.dark,
+          home: PlayerARecordingScreen(controller: controller),
+        ),
+      );
+      await _recordAndStop(tester);
+
+      expect(
+        find.byKey(const ValueKey('recording-playback-seekbar')),
+        findsOneWidget,
+      );
+      await controller.seekPlayback(const Duration(seconds: -5));
+      expect(audio.seekCalls.last.position, Duration.zero);
+      expect(controller.playbackPosition, Duration.zero);
+      expect(audio.playCount, 0);
+
+      await controller.seekPlayback(const Duration(seconds: 20));
+      expect(audio.seekCalls.last.position, const Duration(seconds: 2));
+      expect(controller.playbackPosition, const Duration(seconds: 2));
+      await controller.seekPlayback(const Duration(seconds: 1));
+      await tester.pump();
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const ValueKey('recording-playback-elapsed')),
+            )
+            .data,
+        '00:01',
+      );
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const ValueKey('recording-playback-remaining')),
+            )
+            .data,
+        '00:01',
+      );
+
+      await controller.togglePlayback();
+      expect(audio.isPlaying, isTrue);
+      await controller.seekPlayback(const Duration(milliseconds: 1500));
+      expect(audio.isPlaying, isTrue);
+      expect(audio.seekCalls.last.position, const Duration(milliseconds: 1500));
+      expect(audio.playCount, 0);
+      expect(audio.resumeCount, 1);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
     'playback waveform follows real PCM position and returns idle when stopped',
     (WidgetTester tester) async {
       final audio = _FakeRecordingAudio();
@@ -208,6 +265,9 @@ void main() {
     await tester.pumpWidget(_recordingApp(audio, _FakePermissionGateway()));
     await _recordAndStop(tester);
 
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('recording-re-record')),
+    );
     await tester.tap(find.byKey(const ValueKey('recording-re-record')));
     await tester.pumpAndSettle();
 
@@ -250,21 +310,22 @@ void main() {
     expect(find.byKey(const ValueKey('recording-confirm')), findsOneWidget);
   });
 
-  testWidgets('valid recording confirmation opens the next-stage placeholder', (
+  testWidgets('Player A confirmation opens Player B listening directly', (
     WidgetTester tester,
   ) async {
     final audio = _FakeRecordingAudio();
     await tester.pumpWidget(_recordingApp(audio, _FakePermissionGateway()));
     await _recordAndStop(tester);
 
+    await tester.ensureVisible(find.byKey(const ValueKey('recording-confirm')));
     await tester.tap(find.byKey(const ValueKey('recording-confirm')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Pass the sound to Player B'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('continue-to-player-b')));
-    await tester.pumpAndSettle();
+    expect(find.text('Listen closely'), findsOneWidget);
     expect(find.text('PLAYER B'), findsOneWidget);
     expect(find.text('Player A’s sound, reversed'), findsOneWidget);
+    expect(find.text('Pass the sound to Player B'), findsNothing);
+    expect(find.byKey(const ValueKey('continue-to-player-b')), findsNothing);
   });
 
   testWidgets('Home Start Challenge opens Player A recording', (
@@ -364,12 +425,6 @@ Widget _recordingApp(
     ),
     onGenerateRoute: (settings) {
       final arguments = settings.arguments;
-      if (settings.name == AppRouter.originalReady && arguments is AudioClip) {
-        return MaterialPageRoute<void>(
-          settings: settings,
-          builder: (_) => OriginalReadyScreen(clip: arguments),
-        );
-      }
       if (settings.name == AppRouter.playerBListening &&
           arguments is AudioClip) {
         return MaterialPageRoute<void>(
@@ -432,8 +487,12 @@ class _FakeRecordingAudio implements PlayerARecordingAudio {
   int playCount = 0;
   int pauseCount = 0;
   int resumeCount = 0;
+  final List<({AudioClip clip, Duration position})> seekCalls = [];
   bool disposed = false;
   bool _recording = false;
+  bool _isPlaying = false;
+
+  bool get isPlaying => _isPlaying;
 
   @override
   Stream<bool> get playbackState => _playbackController.stream;
@@ -485,23 +544,33 @@ class _FakeRecordingAudio implements PlayerARecordingAudio {
   @override
   Future<void> play(AudioClip clip) async {
     playCount++;
+    _isPlaying = true;
     _playbackController.add(true);
+  }
+
+  @override
+  Future<void> seek(AudioClip clip, Duration position) async {
+    seekCalls.add((clip: clip, position: position));
+    emitPosition(position);
   }
 
   @override
   Future<void> pausePlayback() async {
     pauseCount++;
+    _isPlaying = false;
     _playbackController.add(false);
   }
 
   @override
   Future<void> resumePlayback() async {
     resumeCount++;
+    _isPlaying = true;
     _playbackController.add(true);
   }
 
   @override
   Future<void> stopPlayback() async {
+    _isPlaying = false;
     _playbackController.add(false);
   }
 

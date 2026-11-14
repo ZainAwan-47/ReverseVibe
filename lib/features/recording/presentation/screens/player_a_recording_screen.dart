@@ -7,6 +7,7 @@ import 'package:reverse_vibe/theme/app_colors.dart';
 
 import '../../../../navigation/app_router.dart';
 import '../controllers/player_a_recording_controller.dart';
+import '../widgets/audio_playback_seek_bar.dart';
 
 class PlayerARecordingScreen extends StatefulWidget {
   const PlayerARecordingScreen({super.key, this.controller});
@@ -129,13 +130,14 @@ class _PlayerARecordingScreenState extends State<PlayerARecordingScreen> {
                               _PlaybackCard(
                                 duration: clip.duration,
                                 position: _controller.playbackPosition,
-                                remaining: _controller.playbackRemaining,
                                 isPlaying: _controller.isPlaying,
                                 waveform: _controller.playbackWaveform,
                                 waveformProgress:
                                     _controller.playbackWaveformProgress,
                                 onToggle: () =>
                                     unawaited(_controller.togglePlayback()),
+                                onSeek: _controller.seekPlayback,
+                                canSeek: !_controller.isBusy,
                               ),
                               const SizedBox(height: 16),
                               LayoutBuilder(
@@ -210,7 +212,7 @@ class _PlayerARecordingScreenState extends State<PlayerARecordingScreen> {
       }
       await Navigator.of(
         context,
-      ).pushReplacementNamed(AppRouter.originalReady, arguments: clip);
+      ).pushReplacementNamed(AppRouter.playerBListening, arguments: clip);
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -320,20 +322,22 @@ class _PlaybackCard extends StatelessWidget {
   const _PlaybackCard({
     required this.duration,
     required this.position,
-    required this.remaining,
     required this.isPlaying,
     required this.waveform,
     required this.waveformProgress,
     required this.onToggle,
+    required this.onSeek,
+    required this.canSeek,
   });
 
   final Duration duration;
   final Duration position;
-  final Duration remaining;
   final bool isPlaying;
   final List<double> waveform;
   final double waveformProgress;
   final VoidCallback onToggle;
+  final Future<void> Function(Duration position) onSeek;
+  final bool canSeek;
 
   @override
   Widget build(BuildContext context) {
@@ -356,33 +360,12 @@ class _PlaybackCard extends StatelessWidget {
                 children: [
                   Text('Original recording', style: textTheme.titleMedium),
                   const SizedBox(height: 8),
-                  LinearProgressIndicator(
-                    value: duration.inMicroseconds == 0
-                        ? 0
-                        : (position.inMicroseconds / duration.inMicroseconds)
-                              .clamp(0, 1)
-                              .toDouble(),
-                    minHeight: 3,
-                    borderRadius: BorderRadius.circular(4),
-                    backgroundColor: AppColors.border,
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        _formatRemainingDuration(duration),
-                        style: textTheme.bodySmall,
-                      ),
-                      Text(
-                        _formatRemainingDuration(remaining),
-                        key: const ValueKey('recording-playback-remaining'),
-                        style: textTheme.bodySmall?.copyWith(
-                          color: AppColors.secondary,
-                          fontFeatures: const [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                    ],
+                  AudioPlaybackSeekBar(
+                    duration: duration,
+                    position: position,
+                    onSeek: onSeek,
+                    keyPrefix: 'recording',
+                    enabled: canSeek,
                   ),
                 ],
               ),
@@ -567,15 +550,5 @@ class _ErrorNotice extends StatelessWidget {
 String _formatDuration(Duration duration) {
   final minutes = duration.inMinutes.toString().padLeft(2, '0');
   final seconds = (duration.inSeconds % 60).toString().padLeft(2, '0');
-  return '$minutes:$seconds';
-}
-
-String _formatRemainingDuration(Duration duration) {
-  final wholeSeconds = duration.inMicroseconds <= 0
-      ? 0
-      : (duration.inMicroseconds + Duration.microsecondsPerSecond - 1) ~/
-            Duration.microsecondsPerSecond;
-  final minutes = (wholeSeconds ~/ 60).toString().padLeft(2, '0');
-  final seconds = (wholeSeconds % 60).toString().padLeft(2, '0');
   return '$minutes:$seconds';
 }

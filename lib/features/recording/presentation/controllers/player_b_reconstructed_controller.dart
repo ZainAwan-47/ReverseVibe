@@ -9,7 +9,11 @@ import '../../data/in_memory_player_a_recording_audio.dart';
 import '../../domain/player_b_imitation_result.dart';
 
 class PlayerBReconstructedController extends ChangeNotifier {
-  PlayerBReconstructedController({required this.result, required this.audio}) {
+  PlayerBReconstructedController({
+    required PlayerBImitationResult result,
+    required this.audio,
+  }) {
+    _result = result;
     _playbackSubscription = audio.playbackState.listen(
       _handlePlaybackState,
       onError: (Object error, StackTrace stackTrace) {
@@ -42,7 +46,12 @@ class PlayerBReconstructedController extends ChangeNotifier {
     );
   }
 
-  final PlayerBImitationResult result;
+  PlayerBImitationResult? _result;
+  PlayerBImitationResult get result =>
+      _result ?? (throw StateError('Challenge audio was cleared.'));
+
+  bool get hasChallengeAudio => _result != null || _reconstructedClip != null;
+
   final PlayerARecordingAudio audio;
 
   AudioClip? _reconstructedClip;
@@ -63,6 +72,8 @@ class PlayerBReconstructedController extends ChangeNotifier {
   bool _isBusy = false;
   bool get isBusy => _isBusy;
 
+  bool _isSeeking = false;
+  Future<void>? _seekInFlight;
   bool _closed = false;
   AudioClip? _activeClip;
   Duration _playbackPosition = Duration.zero;
@@ -112,7 +123,11 @@ class PlayerBReconstructedController extends ChangeNotifier {
   }
 
   Future<void> togglePlayback(AudioClip clip) async {
-    if (_closed || _isBusy || _isPreparing || _reconstructedClip == null) {
+    if (_closed ||
+        _isBusy ||
+        _isSeeking ||
+        _isPreparing ||
+        _reconstructedClip == null) {
       return;
     }
     final sameClip = identical(_activeClip, clip);
@@ -143,10 +158,44 @@ class PlayerBReconstructedController extends ChangeNotifier {
     }
   }
 
+  Future<void> seekPlayback(AudioClip clip, Duration position) async {
+    if (_closed ||
+        _isBusy ||
+        _isSeeking ||
+        _isPreparing ||
+        _reconstructedClip == null ||
+        clip.duration <= Duration.zero) {
+      return;
+    }
+    final boundedPosition = Duration(
+      microseconds: position.inMicroseconds
+          .clamp(0, clip.duration.inMicroseconds)
+          .toInt(),
+    );
+    _isSeeking = true;
+    _activeClip = clip;
+    _playbackPosition = boundedPosition;
+    _errorMessage = null;
+    final seekFinished = Completer<void>();
+    _seekInFlight = seekFinished.future;
+    _notify();
+    try {
+      await audio.seek(clip, boundedPosition);
+    } catch (error) {
+      _errorMessage = 'Could not seek playback: $error';
+    } finally {
+      _isSeeking = false;
+      _notify();
+      seekFinished.complete();
+      _seekInFlight = null;
+    }
+  }
+
   Future<void> stopPlayback() async {
     if (_closed) {
       return;
     }
+    await _seekInFlight;
     if (_activeClip != null || _isPlaying) {
       await audio.stopPlayback();
     }
@@ -156,11 +205,23 @@ class PlayerBReconstructedController extends ChangeNotifier {
     _notify();
   }
 
-  Future<void> close() async {
+  void clearChallenge() {
     if (_closed) {
       return;
     }
+    _clearChallenge();
+    _notify();
+  }
+
+  Future<void> close({bool clearChallenge = false}) async {
+    if (_closed) {
+      if (clearChallenge) {
+        _clearChallenge();
+      }
+      return;
+    }
     _closed = true;
+    await _seekInFlight;
     await _playbackSubscription?.cancel();
     await _positionSubscription?.cancel();
     await _completionSubscription?.cancel();
@@ -170,9 +231,24 @@ class PlayerBReconstructedController extends ChangeNotifier {
       try {
         await audio.dispose();
       } finally {
+        if (clearChallenge) {
+          _clearChallenge();
+        }
         super.dispose();
       }
     }
+  }
+
+  void _clearChallenge() {
+    _result = null;
+    _reconstructedClip = null;
+    _activeClip = null;
+    _playbackPosition = Duration.zero;
+    _isPlaying = false;
+    _isBusy = false;
+    _hasListenedToReconstructed = false;
+    _errorMessage = null;
+    _isPreparing = false;
   }
 
   void _handlePlaybackState(bool isPlaying) {
@@ -184,7 +260,7 @@ class PlayerBReconstructedController extends ChangeNotifier {
   }
 
   void _handlePlaybackPosition(Duration position) {
-    if (_closed) {
+    if (_closed || _isSeeking) {
       return;
     }
     final duration = _activeClip?.duration ?? Duration.zero;

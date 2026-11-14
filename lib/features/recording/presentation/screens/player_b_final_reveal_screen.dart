@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:reverse_vibe/features/recording/presentation/controllers/player_b_reconstructed_controller.dart';
 import 'package:reverse_vibe/theme/app_colors.dart';
 
+import '../../../../navigation/app_router.dart';
 import '../widgets/phase6_playback_card.dart';
 
 class PlayerBFinalRevealScreen extends StatefulWidget {
@@ -26,6 +27,9 @@ class _PlayerBFinalRevealScreenState extends State<PlayerBFinalRevealScreen> {
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
+        if (!_controller.hasChallengeAudio) {
+          return const SizedBox.shrink();
+        }
         final reconstructed = _controller.reconstructedClip;
         final textTheme = Theme.of(context).textTheme;
         return PopScope<Object?>(
@@ -80,10 +84,7 @@ class _PlayerBFinalRevealScreenState extends State<PlayerBFinalRevealScreen> {
                           isPlaying: _controller.isClipPlaying(
                             _controller.result.originalClip,
                           ),
-                          progress: _controller.playbackProgressFor(
-                            _controller.result.originalClip,
-                          ),
-                          remaining: _controller.playbackRemainingFor(
+                          position: _controller.playbackPositionFor(
                             _controller.result.originalClip,
                           ),
                           onToggle: () => unawaited(
@@ -91,7 +92,12 @@ class _PlayerBFinalRevealScreenState extends State<PlayerBFinalRevealScreen> {
                               _controller.result.originalClip,
                             ),
                           ),
+                          onSeek: (position) => _controller.seekPlayback(
+                            _controller.result.originalClip,
+                            position,
+                          ),
                           keyPrefix: 'player-a-original',
+                          canSeek: !_controller.isBusy,
                         ),
                         const SizedBox(height: 14),
                         if (reconstructed != null)
@@ -102,17 +108,40 @@ class _PlayerBFinalRevealScreenState extends State<PlayerBFinalRevealScreen> {
                             title: 'Player B’s reconstructed sound',
                             clip: reconstructed,
                             isPlaying: _controller.isClipPlaying(reconstructed),
-                            progress: _controller.playbackProgressFor(
-                              reconstructed,
-                            ),
-                            remaining: _controller.playbackRemainingFor(
+                            position: _controller.playbackPositionFor(
                               reconstructed,
                             ),
                             onToggle: () => unawaited(
                               _controller.togglePlayback(reconstructed),
                             ),
+                            onSeek: (position) => _controller.seekPlayback(
+                              reconstructed,
+                              position,
+                            ),
                             keyPrefix: 'player-b-reconstructed',
+                            canSeek: !_controller.isBusy,
                           ),
+                        if (_controller.errorMessage case final message?)
+                          Card(
+                            child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Text(
+                                message,
+                                style: textTheme.bodyMedium?.copyWith(
+                                  color: AppColors.error,
+                                ),
+                              ),
+                            ),
+                          ),
+                        const SizedBox(height: 24),
+                        FilledButton.icon(
+                          key: const ValueKey('restart-challenge'),
+                          onPressed: _leaving
+                              ? null
+                              : () => unawaited(_restart()),
+                          icon: const Icon(Icons.refresh_rounded),
+                          label: const Text('Restart'),
+                        ),
                       ],
                     ),
                   ),
@@ -145,6 +174,45 @@ class _PlayerBFinalRevealScreenState extends State<PlayerBFinalRevealScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Could not stop playback: $error')),
+        );
+      }
+    }
+  }
+
+  Future<void> _restart() async {
+    if (_leaving) {
+      return;
+    }
+    _leaving = true;
+    try {
+      await _controller.stopPlayback();
+      if (mounted) {
+        _controller.clearChallenge();
+        unawaited(
+          _controller.close(clearChallenge: true).catchError((
+            Object error,
+            StackTrace stackTrace,
+          ) {
+            FlutterError.reportError(
+              FlutterErrorDetails(
+                exception: error,
+                stack: stackTrace,
+                library: 'ReverseVibe challenge restart',
+                context: ErrorDescription('while releasing playback resources'),
+              ),
+            );
+          }),
+        );
+        Navigator.of(context).pushNamedAndRemoveUntil(
+          AppRouter.playerARecording,
+          (route) => route.settings.name == AppRouter.home,
+        );
+      }
+    } catch (error) {
+      _leaving = false;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not restart the challenge: $error')),
         );
       }
     }

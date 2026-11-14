@@ -35,6 +35,8 @@ class InMemoryPlayerARecordingAudio implements PlayerARecordingAudio {
   Object? _streamError;
   bool _stoppingRecording = false;
   bool _disposed = false;
+  AudioClip? _loadedClip;
+  Duration _loadedPosition = Duration.zero;
 
   @override
   Stream<bool> get playbackState =>
@@ -163,6 +165,44 @@ class InMemoryPlayerARecordingAudio implements PlayerARecordingAudio {
 
     await stopPlayback();
     await _player.play(BytesSource(clip.data, mimeType: clip.mimeType));
+    _loadedClip = clip;
+    _loadedPosition = Duration.zero;
+  }
+
+  @override
+  Future<void> seek(AudioClip clip, Duration position) async {
+    _ensureNotDisposed();
+    if (_recordingSubscription != null) {
+      throw StateError('Stop recording before seeking playback.');
+    }
+    if (clip.duration <= Duration.zero) {
+      return;
+    }
+    final boundedPosition = Duration(
+      microseconds: position.inMicroseconds
+          .clamp(0, clip.duration.inMicroseconds)
+          .toInt(),
+    );
+
+    if (!identical(_loadedClip, clip)) {
+      final wasPlaying = _player.state == PlayerState.playing;
+      await _player.stop();
+      if (wasPlaying) {
+        await _player.play(
+          BytesSource(clip.data, mimeType: clip.mimeType),
+          position: boundedPosition,
+        );
+      } else {
+        await _player.setSourceBytes(clip.data, mimeType: clip.mimeType);
+        await _player.seek(boundedPosition);
+      }
+      _loadedClip = clip;
+      _loadedPosition = boundedPosition;
+      return;
+    }
+
+    await _player.seek(boundedPosition);
+    _loadedPosition = boundedPosition;
   }
 
   @override
@@ -174,13 +214,23 @@ class InMemoryPlayerARecordingAudio implements PlayerARecordingAudio {
   @override
   Future<void> resumePlayback() async {
     _ensureNotDisposed();
-    await _player.resume();
+    final clip = _loadedClip;
+    if (_player.state == PlayerState.stopped && clip != null) {
+      await _player.play(
+        BytesSource(clip.data, mimeType: clip.mimeType),
+        position: _loadedPosition,
+      );
+    } else {
+      await _player.resume();
+    }
   }
 
   @override
   Future<void> stopPlayback() async {
     _ensureNotDisposed();
     await _player.stop();
+    _loadedClip = null;
+    _loadedPosition = Duration.zero;
   }
 
   @override
@@ -206,6 +256,8 @@ class InMemoryPlayerARecordingAudio implements PlayerARecordingAudio {
         _pcmBuffer = null;
         _recordingSubscription = null;
         _streamClosed = null;
+        _loadedClip = null;
+        _loadedPosition = Duration.zero;
       }
     }
   }

@@ -9,8 +9,9 @@ import 'package:reverse_vibe/features/recording/domain/microphone_permission_gat
 import 'package:reverse_vibe/features/recording/domain/player_a_recording_audio.dart';
 import 'package:reverse_vibe/features/recording/domain/player_b_imitation_result.dart';
 import 'package:reverse_vibe/features/recording/presentation/controllers/player_b_listening_controller.dart';
+import 'package:reverse_vibe/features/recording/presentation/controllers/player_a_recording_controller.dart';
 import 'package:reverse_vibe/features/recording/presentation/controllers/player_b_reconstructed_controller.dart';
-import 'package:reverse_vibe/features/recording/presentation/screens/player_a_confirmation_screen.dart';
+import 'package:reverse_vibe/features/recording/presentation/screens/player_a_recording_screen.dart';
 import 'package:reverse_vibe/features/recording/presentation/screens/player_b_final_reveal_screen.dart';
 import 'package:reverse_vibe/features/recording/presentation/screens/player_b_imitation_recording_screen.dart';
 import 'package:reverse_vibe/features/recording/presentation/screens/player_b_listening_screen.dart';
@@ -61,13 +62,14 @@ void main() {
     final reversedOriginal = _wavClip([800, 700, 600, 500, 400, 300, 200, 100]);
     final imitation = _wavClip([10, 20, 30, 40, 50, 60, 70, 80]);
     final imitationBytes = imitation.data;
+    final audio = _FakeAudio(imitation: imitation);
     final controller = PlayerBReconstructedController(
       result: PlayerBImitationResult(
         originalClip: original,
         reversedClip: reversedOriginal,
         imitationClip: imitation,
       ),
-      audio: _FakeAudio(imitation: imitation),
+      audio: audio,
     );
 
     await controller.prepare();
@@ -85,7 +87,10 @@ void main() {
     expect(controller.reconstructedClip!.duration, imitation.duration);
     expect(controller.result.imitationClip.data, imitationBytes);
     expect(controller.result.originalClip.data, original.data);
-    await controller.close();
+    await controller.close(clearChallenge: true);
+    expect(audio.disposed, isTrue);
+    expect(controller.hasChallengeAudio, isFalse);
+    expect(controller.reconstructedClip, isNull);
   });
 
   test(
@@ -143,7 +148,7 @@ void main() {
   );
 
   testWidgets(
-    'Player A confirmation reveals the original and switching clips never overlaps',
+    'Reveal it exposes the original and switching clips never overlaps',
     (WidgetTester tester) async {
       final original = _wavClip([100, 200, 300, 400, 500, 600, 700, 800]);
       final reversedOriginal = _wavClip([
@@ -170,12 +175,14 @@ void main() {
       await tester.pumpWidget(_phase6App(controller));
       await tester.pumpAndSettle();
       expect(find.text('Player B’s reconstructed sound'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('player-b-reconstructed-playback-seekbar')),
+        findsOneWidget,
+      );
       expect(find.text('Player A’s original recording'), findsNothing);
       expect(
         tester
-            .widget<FilledButton>(
-              find.byKey(const ValueKey('ask-player-a-confirmation')),
-            )
+            .widget<FilledButton>(find.byKey(const ValueKey('reveal-it')))
             .onPressed,
         isNull,
       );
@@ -213,19 +220,20 @@ void main() {
       audio.completePlayback();
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const ValueKey('ask-player-a-confirmation')));
-      await tester.pumpAndSettle();
-      expect(find.text('Is this what you said?'), findsOneWidget);
-      expect(find.text('Player A’s original recording'), findsNothing);
-      expect(
-        find.byKey(const ValueKey('player-a-original-playback-toggle')),
-        findsNothing,
-      );
-
-      await tester.tap(find.byKey(const ValueKey('player-a-confirm-reveal')));
+      await tester.tap(find.byKey(const ValueKey('reveal-it')));
       await tester.pumpAndSettle();
       expect(find.text('Player A’s original recording'), findsOneWidget);
       expect(find.text('Player B’s reconstructed sound'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('player-a-original-playback-seekbar')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('player-b-reconstructed-playback-seekbar')),
+        findsOneWidget,
+      );
+      expect(find.text('Is this what you said?'), findsNothing);
+      expect(find.text('Restart'), findsOneWidget);
 
       await tester.tap(
         find.byKey(const ValueKey('player-b-reconstructed-playback-toggle')),
@@ -279,6 +287,162 @@ void main() {
       );
       expect(audio.isPlaying, isFalse);
 
+      final originalSeekBar = find.byKey(
+        const ValueKey('player-a-original-playback-seekbar'),
+      );
+      final seekBarRect = tester.getRect(originalSeekBar);
+      await tester.tapAt(Offset(seekBarRect.center.dx, seekBarRect.center.dy));
+      await tester.pumpAndSettle();
+      expect(audio.seekCalls.last.clip, same(original));
+      expect(
+        controller.playbackPositionFor(original).inSeconds,
+        closeTo(1, 0.1),
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'Restart stops playback, clears challenge audio, and starts a fresh recording',
+    (WidgetTester tester) async {
+      final original = _wavClip([100, 200, 300, 400, 500, 600, 700, 800]);
+      final reversedOriginal = _wavClip([
+        800,
+        700,
+        600,
+        500,
+        400,
+        300,
+        200,
+        100,
+      ]);
+      final imitation = _wavClip([10, 20, 30, 40, 50, 60, 70, 80]);
+      final audio = _FakeAudio(imitation: imitation);
+      final controller = PlayerBReconstructedController(
+        result: PlayerBImitationResult(
+          originalClip: original,
+          reversedClip: reversedOriginal,
+          imitationClip: imitation,
+        ),
+        audio: audio,
+      );
+      PlayerARecordingController? restartedController;
+      _FakeAudio? restartedAudio;
+      final generatedRoutes = <String?>[];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.dark,
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => Center(
+                child: TextButton(
+                  key: const ValueKey('open-previous-challenge'),
+                  onPressed: () => Navigator.of(context).pushNamed(
+                    AppRouter.playerBReconstructed,
+                    arguments: controller.result,
+                  ),
+                  child: const Text('Open previous challenge'),
+                ),
+              ),
+            ),
+          ),
+          onGenerateRoute: (settings) {
+            generatedRoutes.add(settings.name);
+            final arguments = settings.arguments;
+            if (settings.name == AppRouter.playerBReconstructed &&
+                arguments is PlayerBImitationResult) {
+              return MaterialPageRoute<void>(
+                settings: settings,
+                builder: (_) =>
+                    PlayerBReconstructedScreen(controller: controller),
+              );
+            }
+            if (settings.name == AppRouter.playerBFinalReveal &&
+                arguments is PlayerBReconstructedController) {
+              return MaterialPageRoute<void>(
+                settings: settings,
+                builder: (_) => PlayerBFinalRevealScreen(controller: arguments),
+              );
+            }
+            if (settings.name == AppRouter.playerARecording) {
+              final freshAudio = _FakeAudio(imitation: imitation);
+              final freshController = PlayerARecordingController(
+                audio: freshAudio,
+                permissionGateway: _FakePermissionGateway(),
+              );
+              restartedAudio = freshAudio;
+              restartedController = freshController;
+              return MaterialPageRoute<void>(
+                settings: settings,
+                builder: (_) =>
+                    PlayerARecordingScreen(controller: freshController),
+              );
+            }
+            return null;
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('open-previous-challenge')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('player-b-reconstructed-playback-toggle')),
+      );
+      await tester.pumpAndSettle();
+      audio.completePlayback();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('reveal-it')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('player-a-original-playback-toggle')),
+      );
+      await tester.pumpAndSettle();
+      expect(audio.isPlaying, isTrue);
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.byKey(const ValueKey('restart-challenge')),
+            )
+            .onPressed,
+        isNotNull,
+      );
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('restart-challenge')),
+      );
+      await tester.tap(find.byKey(const ValueKey('restart-challenge')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('Could not restart the challenge'),
+        findsNothing,
+      );
+      expect(generatedRoutes, contains(AppRouter.playerARecording));
+      expect(restartedController, isNotNull);
+      expect(find.text('Record the original'), findsOneWidget);
+      expect(find.text('The original sound'), findsNothing);
+      expect(audio.isPlaying, isFalse);
+      expect(controller.hasChallengeAudio, isFalse);
+      expect(controller.reconstructedClip, isNull);
+      expect(controller.isBusy, isFalse);
+      expect(audio.playbackEvents.last, 'stop');
+      expect(restartedController, isNotNull);
+      expect(restartedController!.clip, isNull);
+      expect(restartedController!.playbackPosition, Duration.zero);
+      expect(restartedAudio!.startCount, 0);
+
+      await tester.tap(find.byKey(const ValueKey('recording-start')));
+      await tester.pumpAndSettle();
+      expect(restartedAudio!.startCount, 1);
+      expect(restartedController!.clip, isNull);
+      expect(find.text('Your reconstructed result'), findsNothing);
+
+      await tester.tap(find.byTooltip('Back'));
+      await tester.pumpAndSettle();
+      expect(find.text('Open previous challenge'), findsOneWidget);
+      expect(find.text('Your reconstructed result'), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
@@ -326,12 +490,6 @@ Widget _phase6App(PlayerBReconstructedController controller) {
     onGenerateRoute: (settings) {
       final arguments = settings.arguments;
       if (arguments is PlayerBReconstructedController) {
-        if (settings.name == AppRouter.playerAConfirmation) {
-          return MaterialPageRoute<void>(
-            settings: settings,
-            builder: (_) => PlayerAConfirmationScreen(controller: arguments),
-          );
-        }
         if (settings.name == AppRouter.playerBFinalReveal) {
           return MaterialPageRoute<void>(
             settings: settings,
@@ -414,7 +572,10 @@ class _FakeAudio implements PlayerARecordingAudio {
       StreamController<void>.broadcast(sync: true);
   final List<AudioClip> playedClips = [];
   final List<String> playbackEvents = [];
+  final List<({AudioClip clip, Duration position})> seekCalls = [];
   bool _isPlaying = false;
+  bool disposed = false;
+  int startCount = 0;
 
   bool get isPlaying => _isPlaying;
 
@@ -434,7 +595,9 @@ class _FakeAudio implements PlayerARecordingAudio {
   Stream<void> get recordingInterrupted => _interruptedController.stream;
 
   @override
-  Future<void> startRecording() async {}
+  Future<void> startRecording() async {
+    startCount++;
+  }
 
   @override
   Future<AudioClip> stopRecording() async {
@@ -450,6 +613,12 @@ class _FakeAudio implements PlayerARecordingAudio {
     playbackEvents.add('play');
     _isPlaying = true;
     _playbackController.add(true);
+  }
+
+  @override
+  Future<void> seek(AudioClip clip, Duration position) async {
+    seekCalls.add((clip: clip, position: position));
+    _positionController.add(position);
   }
 
   @override
@@ -483,6 +652,7 @@ class _FakeAudio implements PlayerARecordingAudio {
   @override
   Future<void> dispose() async {
     _isPlaying = false;
+    disposed = true;
     await _playbackController.close();
     await _positionController.close();
     await _completionController.close();
